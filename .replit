@@ -1,15 +1,31 @@
-entrypoint = "main.py"
+run = "python -m atia"
+language = "python3"
+entrypoint = "atia/__init__.py"
+hidden = [".pythonlibs"]
 modules = ["python-3.11"]
 
 [nix]
-channel = "stable-24_05"
+channel = "stable-23_11"
+
+[packager]
+language = "python3"
+ignoredPackages = ["unit_tests"]
+
+[packager.features]
+enabledForHosting = false
+packageSearch = true
+
+[env]
+PYTHON_VERSION = "3.11"
+PYTHONPATH = "${PYTHONPATH}:${workspaceDir}"
 
 [unitTest]
 language = "python3"
 
-[gitHubImport]
-requiredFiles = [".replit", "replit.nix"]
+[languages]
 
-[deployment]
-run = ["python3", "main.py"]
-deploymentTarget = "cloudrun"
+[languages.python3]
+pattern = "**/*.py"
+
+[languages.python3.languageServer]
+start = "pylsp"
