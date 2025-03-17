@@ -9,12 +9,14 @@ This module provides a simple CLI for interacting with the ATIA system.
 import argparse
 import asyncio
 import sys
+import json
 from typing import Dict, Optional
 
 from atia.agent_core import AgentCore
 from atia.need_identifier import NeedIdentifier
 from atia.api_discovery import APIDiscovery
 from atia.doc_processor import DocumentationProcessor
+from atia.account_manager import AccountManager
 
 
 async def process_query(query: str, context: Optional[Dict] = None) -> None:
@@ -33,6 +35,7 @@ async def process_query(query: str, context: Optional[Dict] = None) -> None:
     need_identifier = NeedIdentifier()
     api_discovery = APIDiscovery()
     doc_processor = DocumentationProcessor()
+    account_manager = AccountManager()  # Add the Account Manager component
 
     print("\n🤖 ATIA - Autonomous Tool Integration Agent\n")
     print(f"Query: {query}\n")
@@ -63,13 +66,35 @@ async def process_query(query: str, context: Optional[Dict] = None) -> None:
             print(f"Documentation URL: {top_api.documentation_url}")
             print(f"Relevance score: {top_api.relevance_score:.2f}\n")
 
-            # For Phase 1, we'll just demonstrate fetching the documentation
+            # Step 4: Process API documentation
             print("📝 Fetching API documentation...")
             try:
-                print(f"API documentation would be processed here in later phases.")
-                print("For Phase 1, this is a placeholder for documentation processing.")
+                # For Phase 2, we can attempt to fetch and process the documentation
+                print("Processing API documentation...")
+
+                # Convert the API candidate to a format suitable for account registration
+                api_info = {
+                    "id": f"api_{hash(top_api.name)}",
+                    "name": top_api.name,
+                    "provider": top_api.provider,
+                    "description": top_api.description,
+                    "documentation_url": top_api.documentation_url,
+                    "auth_type": top_api.auth_type if hasattr(top_api, "auth_type") else "api_key",
+                    "requires_auth": top_api.requires_auth
+                }
+
+                # Step 5: Register with the Account Manager
+                print("🔑 Handling authentication...")
+                credential = await account_manager.register_api(api_info)
+
+                print(f"Successfully registered {top_api.name} with authentication type: {credential.auth_type}")
+                print(f"Credential ID: {credential.id}")
+
+                # In a full implementation, we would use this credential to make API calls
+                print("Ready to use the API with secure authentication.")
+
             except Exception as e:
-                print(f"Error fetching documentation: {e}")
+                print(f"Error processing API: {e}")
         else:
             print("No suitable APIs found for this need.")
     else:
