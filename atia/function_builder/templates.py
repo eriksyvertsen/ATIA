@@ -182,7 +182,7 @@ async def test_{function_name}_success():
 
         # Assertions
         assert result == mock_response
-        mock_session.{method.lower()}.assert_called_once()
+        getattr(mock_session, method.lower()).assert_called_once()
 
 
 @pytest.mark.asyncio

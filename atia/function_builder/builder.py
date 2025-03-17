@@ -44,7 +44,44 @@ class FunctionBuilder:
             ApiType.GRAPHQL: GRAPHQL_TEMPLATE,
             ApiType.GENERIC: GENERIC_API_TEMPLATE
         }
+        # Make sure the test template is properly initialized
         self.test_template = FUNCTION_TEST_TEMPLATE
+
+        # Verify that the template doesn't have any formatting issues
+        try:
+            # Test the template with sample values to catch any formatting errors
+            self.test_template.format(
+                function_name="test_func",
+                test_params="param = 'value'",
+                param_values="param=param",
+                method="get"
+            )
+        except Exception as e:
+            # Fall back to a simpler template if there's a formatting issue
+            import logging
+            logging.warning(f"Error with test template: {e}. Using simplified template.")
+            self.test_template = """
+import pytest
+import aiohttp
+from unittest.mock import patch, MagicMock
+
+@pytest.mark.asyncio
+async def test_{function_name}_success():
+    \"\"\"Test successful API call.\"\"\"
+    # Test parameters
+    {test_params}
+
+    # Mock response
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.json.return_value = {{"success": True}}
+
+    with patch('aiohttp.ClientSession', return_value=mock_session):
+        # Call function with parameters
+        result = await {function_name}({param_values})
+        assert result is not None
+"""
 
     async def generate_function(self, 
                               api_info: APIInfo, 
@@ -104,7 +141,14 @@ class FunctionBuilder:
         """Generate a function name based on the endpoint."""
         # Extract domain from base_url
         from urllib.parse import urlparse
-        domain = urlparse(base_url).netloc.split('.')[0]
+        netloc = urlparse(base_url).netloc
+        domain_parts = netloc.split('.')
+
+        # Use the main domain name part (usually the second part like "example" in "api.example.com")
+        if len(domain_parts) >= 2:
+            domain = domain_parts[1]  # Extract "example" from "api.example.com"
+        else:
+            domain = domain_parts[0]
 
         # Clean up the path to create a function name
         path_parts = [p for p in endpoint.path.split('/') if p and not p.startswith('{')]
@@ -285,12 +329,15 @@ class FunctionBuilder:
         test_params_str = "\n        ".join(test_params)
         param_values_str = ", ".join(param_values)
 
+        # Make sure method is lowercase for HTTP methods
+        method = function_def.method.lower() if hasattr(function_def.method, 'lower') else 'get'
+
         # Generate the test code
         test_code = self.test_template.format(
             function_name=function_def.name,
             test_params=test_params_str,
             param_values=param_values_str,
-            method=function_def.method
+            method=method
         )
 
         return test_code

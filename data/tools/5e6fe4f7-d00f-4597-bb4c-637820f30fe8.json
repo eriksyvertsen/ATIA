@@ -1,0 +1,20 @@
+{
+  "id": "5e6fe4f7-d00f-4597-bb4c-637820f30fe8",
+  "name": "test_function",
+  "description": "A test function",
+  "function_id": "b854cb6d-298e-4b81-93df-44c7164e99d1",
+  "api_source_id": "test_api",
+  "capability_tags": [
+    "test",
+    "example"
+  ],
+  "metadata": {
+    "endpoint": "/test",
+    "method": "GET",
+    "api_type": "rest"
+  },
+  "usage_count": 0,
+  "created_at": "2025-03-17T04:23:47.752980",
+  "updated_at": "2025-03-17T04:23:47.752982",
+  "last_used": null
+}
