@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     openai_max_tokens: int = int(os.getenv("OPENAI_MAX_TOKENS", "2000"))
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", "0.2"))
 
+    # OpenAI Responses API configuration
+    openai_assistant_id: Optional[str] = os.getenv("OPENAI_ASSISTANT_ID", "")
+    openai_responses_enabled: bool = os.getenv("OPENAI_RESPONSES_ENABLED", "False").lower() == "true"
+
     # RapidAPI configuration
     rapid_api_key: Optional[str] = os.getenv("RAPID_API_KEY", "")
 

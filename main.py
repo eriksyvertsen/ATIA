@@ -17,33 +17,43 @@ from atia.need_identifier import NeedIdentifier
 from atia.api_discovery import APIDiscovery
 from atia.doc_processor import DocumentationProcessor
 from atia.account_manager import AccountManager
+from atia.tool_registry import ToolRegistry
+from atia.config import settings
 
 
-async def process_query(query: str, context: Optional[Dict] = None) -> None:
+async def process_query(query: str, context: Optional[Dict] = None, use_responses_api: bool = False) -> None:
     """
     Process a user query and display the results.
 
     Args:
         query: The user query
         context: Additional context about the query
+        use_responses_api: Whether to use the Responses API
     """
     if context is None:
         context = {}
 
     # Initialize components
-    agent = AgentCore()
+    tool_registry = ToolRegistry()
+    agent = AgentCore(tool_registry=tool_registry)
     need_identifier = NeedIdentifier()
     api_discovery = APIDiscovery()
     doc_processor = DocumentationProcessor()
-    account_manager = AccountManager()  # Add the Account Manager component
+    account_manager = AccountManager()
 
     print("\n🤖 ATIA - Autonomous Tool Integration Agent\n")
     print(f"Query: {query}\n")
 
     # Step 1: Process the query with the agent
     print("🧠 Processing query...")
-    agent_response = await agent.process_query(query, context)
-    print(f"Initial response: {agent_response}\n")
+
+    if use_responses_api or settings.openai_responses_enabled:
+        print("Using Responses API...")
+        agent_response = await agent.process_query_with_responses_api(query, context=context)
+        print(f"Initial response: {agent_response.get('content', '')}\n")
+    else:
+        agent_response = await agent.process_query(query, context)
+        print(f"Initial response: {agent_response}\n")
 
     # Step 2: Identify if a tool is needed
     print("🔍 Identifying tool needs...")
@@ -108,11 +118,13 @@ async def main():
     parser = argparse.ArgumentParser(description="ATIA - Autonomous Tool Integration Agent")
     parser.add_argument("query", nargs="?", help="The query to process")
     parser.add_argument("--interactive", "-i", action="store_true", help="Run in interactive mode")
+    parser.add_argument("--responses-api", "-r", action="store_true", help="Use the Responses API")
 
     args = parser.parse_args()
 
     if args.interactive:
         print("🤖 ATIA - Autonomous Tool Integration Agent")
+        print(f"{'Using Responses API' if args.responses_api or settings.openai_responses_enabled else 'Using standard API'}")
         print("Type 'exit' or 'quit' to exit.")
 
         while True:
@@ -121,9 +133,9 @@ async def main():
             if query.lower() in ["exit", "quit"]:
                 break
 
-            await process_query(query)
+            await process_query(query, use_responses_api=args.responses_api)
     elif args.query:
-        await process_query(args.query)
+        await process_query(args.query, use_responses_api=args.responses_api)
     else:
         parser.print_help()
 

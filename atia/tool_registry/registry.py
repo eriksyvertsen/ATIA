@@ -146,6 +146,9 @@ class ToolRegistry:
             # Exclude embedding from file storage as it's large
             json.dump(tool_dict, f, indent=2)
 
+        # Also store the function definition
+        self._save_function_definition(function_def)
+
         return tool
 
     async def search_by_capability(self, capability_description: str, 
@@ -263,3 +266,186 @@ class ToolRegistry:
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
             return None
+
+    def _save_function_definition(self, function_def: FunctionDefinition) -> None:
+        """
+        Save a function definition to file.
+
+        Args:
+            function_def: Function definition to save
+        """
+        try:
+            # Create functions directory if it doesn't exist
+            os.makedirs("data/functions", exist_ok=True)
+
+            # Prepare the data for serialization
+            func_data = {
+                "id": function_def.id,
+                "name": function_def.name,
+                "description": function_def.description,
+                "api_source_id": function_def.api_source_id,
+                "api_type": function_def.api_type.value,
+                "parameters": [
+                    {
+                        "name": param.name,
+                        "param_type": param.param_type.value,
+                        "description": param.description,
+                        "required": param.required,
+                        "default_value": param.default_value
+                    }
+                    for param in function_def.parameters
+                ],
+                "code": function_def.code,
+                "endpoint": function_def.endpoint,
+                "method": function_def.method,
+                "response_format": function_def.response_format,
+                "tags": function_def.tags,
+                "created_at": str(function_def.created_at),
+                "updated_at": str(function_def.updated_at)
+            }
+
+            # Save to file
+            with open(f"data/functions/{function_def.id}.json", "w") as f:
+                json.dump(func_data, f, indent=2)
+
+            logger.info(f"Saved function definition {function_def.id} to file")
+        except Exception as e:
+            logger.error(f"Failed to save function definition: {e}")
+
+    async def get_tool_by_name(self, name: str) -> Optional[ToolRegistration]:
+        """
+        Get a tool by name.
+
+        Args:
+            name: Name of the tool
+
+        Returns:
+            Tool registration or None if not found
+        """
+        for tool in self._tools.values():
+            if tool.name == name:
+                return tool
+
+        return None
+
+    async def get_tools_for_responses_api(self, capability_description: str = None) -> List[Dict]:
+        """
+        Get tools in Responses API format.
+
+        Args:
+            capability_description: Optional capability description to filter tools
+
+        Returns:
+            List of tools in Responses API format
+        """
+        # Import here to avoid circular imports
+        from atia.function_builder.builder import FunctionBuilder
+
+        if capability_description:
+            # Search for tools matching the capability
+            tools = await self.search_by_capability(capability_description)
+        else:
+            # Get all tools
+            tools = list(self._tools.values())
+
+        # Convert to Responses API format
+        responses_api_tools = []
+        function_builder = FunctionBuilder()
+
+        for tool in tools:
+            # Get the function definition
+            function_def = await self._get_function_definition(tool.function_id)
+
+            # Convert to Responses API format
+            if function_def:
+                tool_schema = function_builder.generate_responses_api_tool_schema(function_def)
+                responses_api_tools.append(tool_schema)
+
+        return responses_api_tools
+
+    async def _get_function_definition(self, function_id: str) -> Optional[FunctionDefinition]:
+        """
+        Get a function definition by ID.
+
+        Args:
+            function_id: ID of the function
+
+        Returns:
+            Function definition or None if not found
+        """
+        # In a real implementation, this would retrieve from a database
+        # For Phase 3, we'll implement a basic file-based lookup
+
+        # Import here to avoid circular imports
+        from atia.function_builder.models import FunctionDefinition, ApiType, ParameterType, FunctionParameter
+        import os
+        import json
+
+        # Check if a file with this function_id exists in the functions directory
+        tools_dir = "data/functions"
+        os.makedirs(tools_dir, exist_ok=True)
+        function_file = f"{tools_dir}/{function_id}.json"
+
+        if os.path.exists(function_file):
+            try:
+                with open(function_file, "r") as f:
+                    func_data = json.load(f)
+
+                # Convert parameters from dict to FunctionParameter objects
+                parameters = []
+                for param_data in func_data.get("parameters", []):
+                    parameters.append(FunctionParameter(
+                        name=param_data.get("name", ""),
+                        param_type=ParameterType(param_data.get("param_type", "string")),
+                        description=param_data.get("description", ""),
+                        required=param_data.get("required", False),
+                        default_value=param_data.get("default_value")
+                    ))
+
+                return FunctionDefinition(
+                    id=func_data.get("id", function_id),
+                    name=func_data.get("name", ""),
+                    description=func_data.get("description", ""),
+                    api_source_id=func_data.get("api_source_id", ""),
+                    api_type=ApiType(func_data.get("api_type", "rest")),
+                    parameters=parameters,
+                    code=func_data.get("code", ""),
+                    endpoint=func_data.get("endpoint", ""),
+                    method=func_data.get("method", "GET"),
+                    tags=func_data.get("tags", [])
+                )
+            except Exception as e:
+                logger.error(f"Error loading function definition: {e}")
+
+        # If no file exists or there was an error, return a mock function definition for development
+        logger.warning(f"No function definition found for {function_id}, using mock implementation")
+        return FunctionDefinition(
+            id=function_id,
+            name=f"function_{function_id[:8]}",
+            description=f"Mock function for {function_id}",
+            api_source_id="mock_api",
+            api_type=ApiType.REST,
+            parameters=[
+                FunctionParameter(
+                    name="param1",
+                    param_type=ParameterType.STRING,
+                    description="A test parameter",
+                    required=True
+                )
+            ],
+            code=f"""
+async def function_{function_id[:8]}(param1: str):
+    \"\"\"
+    Mock function for {function_id}
+
+    Args:
+        param1: A test parameter
+
+    Returns:
+        A mock response
+    \"\"\"
+    return {{"result": param1, "function_id": "{function_id}"}}
+""",
+            endpoint="/test",
+            method="GET"
+        )

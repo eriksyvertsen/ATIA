@@ -1,0 +1,791 @@
+# Technical Specification Document
+# Autonomous Tool Integration Agent (ATIA)
+
+## Document Information
+- **Version**: 1.1
+- **Date**: March 17, 2025
+- **Status**: Revision Draft
+
+## 1. System Overview
+
+### 1.1 Purpose
+The Autonomous Tool Integration Agent (ATIA) is designed to enhance AI agent capabilities by autonomously discovering, integrating, and utilizing external APIs as tools. The system will identify when a tool is needed, search for appropriate APIs, comprehend documentation, handle account registration, securely manage credentials, and create reusable function definitions for future use.
+
+### 1.2 System Architecture
+
+#### 1.2.1 High-Level Architecture
+The system follows a modular architecture with six core components that work together to enable autonomous tool integration:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ ATIA System                                                              │
+│                                                                          │
+│  ┌──────────────┐    ┌───────────────┐    ┌──────────────────┐          │
+│  │ Agent Core/  │    │ API Discovery │    │ Documentation    │          │
+│  │ Need         ├───►& Selection     ├───►│ Comprehension    │          │
+│  │ Identifier   │    │               │    │                  │          │
+│  └──────────────┘    └───────────────┘    └──────────┬───────┘          │
+│          ▲                                            │                  │
+│          │                                            ▼                  │
+│  ┌──────────────┐    ┌───────────────┐    ┌──────────────────┐          │
+│  │ Tool         │    │ Function      │    │ Account & Key    │          │
+│  │ Registry     │◄───┤ Definition    │◄───┤ Management       │          │
+│  │              │    │               │    │                  │          │
+│  └──────────────┘    └───────────────┘    └──────────────────┘          │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 1.2.2 Technology Stack
+- **Core Framework**: Python 3.11+
+- **AI Processing**: OpenAI API with Responses API integration
+- **API Integration**: RESTful and GraphQL client libraries (aiohttp, gql)
+- **Data Storage**: PostgreSQL with pgvector extension
+- **Vector Database**: Pinecone for semantic search of tools
+- **Security**: PyJWT, cryptography, AWS Secrets Manager
+- **Testing**: pytest, hypothesis
+- **Documentation**: Sphinx, OpenAPI
+- **CI/CD**: GitHub Actions
+
+## 2. Detailed Component Specifications
+
+### 2.1 Agent Core/Need Identification Component
+
+#### 2.1.1 Purpose
+Serves as the primary orchestration component and detects when the agent requires external tools based on user queries or task requirements.
+
+#### 2.1.2 Implementation Details
+The Agent Core will leverage OpenAI's Responses API to benefit from enhanced tool use capabilities:
+
+```python
+from openai import OpenAI
+from openai.types.beta.threads import Run
+
+class AgentCore:
+    def __init__(self, name: str = "ATIA"):
+        self.name = name
+        self.client = OpenAI(api_key=settings.openai_api_key)
+        self.system_prompt = (
+            f"You are {name}, an Autonomous Tool Integration Agent capable of "
+            f"identifying when you need new tools, discovering APIs, and integrating them. "
+            f"You have access to a function registry and can create new functions as needed."
+        )
+
+    async def process_query(self, query: str, context: Optional[Dict] = None) -> str:
+        """
+        Process a user query and return a response.
+
+        For Phase 1-2: Continue using the existing implementation that leverages
+        the standard Chat Completions API.
+
+        Starting Phase 3: Transition to using the Responses API.
+        """
+        if context is None:
+            context = {}
+
+        # For Phases 1-2: Use existing implementation with minor modifications
+        return get_completion(
+            prompt=query,
+            system_message=self.system_prompt,
+            temperature=settings.openai_temperature,
+            max_tokens=settings.openai_max_tokens,
+            model=settings.openai_model
+        )
+
+    async def process_query_with_responses_api(self, query: str, tools: List[Dict] = None, 
+                                         context: Optional[Dict] = None) -> Dict:
+        """
+        Process a query using the Responses API with available tools.
+        This will be enabled in Phase 3.
+        """
+        if context is None:
+            context = {}
+
+        messages = [{"role": "user", "content": query}]
+
+        # Create a response using the Responses API
+        response = self.client.beta.threads.create_and_run(
+            messages=messages,
+            tools=tools or [],
+            model=settings.openai_model,
+            instructions=self.system_prompt
+        )
+
+        # Retrieve the response
+        completion = self._wait_for_completion(response.id)
+        return completion
+
+    def _wait_for_completion(self, run_id: str) -> Dict:
+        """Poll for completion of a Responses API run."""
+        # Polling implementation details
+        pass
+```
+
+#### 2.1.3 Capability Assessment Algorithm
+The Need Identifier will be enhanced to leverage the reasoning capabilities of the Responses API:
+
+```python
+class NeedIdentifier:
+    def __init__(self, threshold: float = settings.need_identifier_threshold):
+        self.threshold = threshold
+        self.tool_categories = self._load_tool_categories()
+        self.client = OpenAI(api_key=settings.openai_api_key)
+
+    async def identify_tool_need(self, query: str, context: Optional[Dict] = None) -> Optional[ToolNeed]:
+        """
+        Determines if a tool is needed based on user query and context.
+
+        For Phase 1-2: Continue using the existing implementation.
+        Phase 3+: Leverage Responses API's structured outputs.
+        """
+        # For Phases 1-2, keep the existing implementation
+        if context is None:
+            context = {}
+
+        prompt = self._construct_need_detection_prompt(query, context)
+        response = self._get_llm_evaluation(prompt)
+
+        if response.get("tool_needed", False) and response.get("confidence", 0) > self.threshold:
+            return ToolNeed(
+                category=response["category"],
+                description=response["description"],
+                confidence=response["confidence"]
+            )
+
+        return None
+
+    async def identify_tool_need_with_responses_api(self, query: str, context: Optional[Dict] = None) -> Optional[ToolNeed]:
+        """
+        Uses Responses API to determine if a tool is needed.
+        Will be implemented in Phase 3.
+        """
+        # Implementation using Responses API
+        pass
+```
+
+### 2.2 API Discovery & Selection Component
+
+#### 2.2.1 Purpose
+Search for relevant APIs that can fulfill the identified tool need and select the most appropriate candidate.
+
+#### 2.2.2 Implementation Details
+
+```python
+class APIDiscovery:
+    """
+    Search for relevant APIs that can fulfill the identified tool need.
+
+    Phase 1-2: Continue using the existing implementation.
+    Phase 3+: Leverage the Responses API for more sophisticated API discovery.
+    """
+
+    def __init__(self):
+        self.rapid_api_key = settings.rapid_api_key
+        self.serp_api_key = settings.serp_api_key
+        self.github_token = settings.github_token
+        self.client = OpenAI(api_key=settings.openai_api_key)
+
+    # Phase 1-2: Maintain compatibility with existing implementation
+    def formulate_search_query(self, capability_description: str) -> str:
+        """Generate an effective search query based on capability description."""
+        prompt = f"Generate a search query to find APIs that provide this capability: {capability_description}"
+        system_message = "You are an expert at formulating search queries for finding APIs."
+
+        return get_completion(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.3,
+            max_tokens=100,
+            model="gpt-4o-mini"
+        )
+
+    # Phase 3+: Implement Responses API version
+    async def formulate_search_query_with_responses_api(self, capability_description: str) -> str:
+        """Uses Responses API to generate more effective search queries."""
+        # Implementation using Responses API
+        pass
+```
+
+### 2.3 Documentation Comprehension Component
+
+#### 2.3.1 Purpose
+Parse and extract structured information from API documentation to understand endpoints, parameters, and authentication requirements.
+
+#### 2.3.2 Implementation Details
+Enhance with Responses API while maintaining backward compatibility:
+
+```python
+class DocumentationProcessor:
+    """
+    Parse and extract structured information from API documentation.
+    """
+
+    # Phase 1-2: Continue using existing implementation
+    def extract_api_info_with_llm(self, doc_content: str) -> APIInfo:
+        """Extract API information using standard completions API."""
+        prompt = f"""
+        Extract the following information from this API documentation:
+        1. Base URL
+        2. Available endpoints (with paths, methods, and descriptions)
+        3. Authentication methods
+        4. Required headers
+        5. Request parameters for each endpoint
+        6. Response formats
+
+        Documentation:
+        {doc_content[:8000]}  # Truncate to avoid token limits
+
+        Return the information in JSON format.
+        """
+
+        system_message = (
+            "You are an expert at extracting structured information from API documentation. "
+            "Analyze the provided documentation and extract the requested information accurately."
+        )
+
+        result = get_json_completion(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.1,
+            max_tokens=4000
+        )
+
+        # Convert the LLM result to APIInfo format
+        # ...existing implementation...
+
+    # Phase 3+: Implement Responses API version
+    async def extract_api_info_with_responses_api(self, doc_content: str) -> APIInfo:
+        """
+        Extract API information using Responses API for more structured outputs.
+        Will replace the standard implementation in Phase 3.
+        """
+        # Implementation using Responses API
+        pass
+```
+
+### 2.4 Account & Key Management Component
+
+#### 2.4.1 Purpose
+Handle the account registration process and securely manage API credentials.
+
+#### 2.4.2 Implementation Details
+Continue using the existing implementation through Phase 2, with planned extensions for Responses API in Phase 3:
+
+```python
+class AccountManager:
+    """
+    Handles the account registration process and securely manages API credentials.
+    No immediate changes needed for Phase 1-2 compatibility.
+    """
+
+    def __init__(self):
+        self._credentials = {}  # In-memory storage for credentials (for Phase 1-2)
+        self._auth_handlers = {
+            AuthType.API_KEY: self._handle_api_key_auth,
+            AuthType.OAUTH: self._handle_oauth_auth,
+            AuthType.BASIC: self._handle_basic_auth,
+            AuthType.JWT: self._handle_jwt_auth,
+            AuthType.BEARER: self._handle_bearer_auth,
+        }
+
+    # Existing implementation is maintained for Phase 1-2
+```
+
+### 2.5 Function Definition Component
+
+#### 2.5.1 Purpose
+Generate reusable function definitions based on API documentation and requirements.
+
+#### 2.5.2 Implementation Details
+Enhance function building to align with Responses API tools schema:
+
+```python
+class FunctionBuilder:
+    """
+    Generates reusable function definitions based on API documentation.
+
+    Phase 1-2: Continue using the existing implementation.
+    Phase 3+: Enhance to produce functions compatible with Responses API.
+    """
+
+    # Phase 1-2: Maintain existing implementation
+
+    # Phase 3+: Add Responses API compatibility
+    def generate_responses_api_tool_schema(self, function_def: FunctionDefinition) -> Dict:
+        """
+        Convert a FunctionDefinition to a Responses API compatible tool schema.
+        Will be implemented in Phase 3.
+        """
+        tool_schema = {
+            "type": "function",
+            "function": {
+                "name": function_def.name,
+                "description": function_def.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        }
+
+        # Convert parameters to OpenAI's tool schema format
+        for param in function_def.parameters:
+            param_schema = {
+                "type": param.param_type.value,
+                "description": param.description
+            }
+
+            if param.default_value is not None:
+                param_schema["default"] = param.default_value
+
+            tool_schema["function"]["parameters"]["properties"][param.name] = param_schema
+
+            if param.required:
+                tool_schema["function"]["parameters"]["required"].append(param.name)
+
+        return tool_schema
+```
+
+### 2.6 Tool Registry Component
+
+#### 2.6.1 Purpose
+Maintain a persistent registry of integrated tools for reuse across sessions.
+
+#### 2.6.2 Implementation Details
+Enhance registry to support Responses API:
+
+```python
+class ToolRegistry:
+    """
+    Maintains a registry of integrated tools for reuse across sessions.
+
+    Phase 1-2: Continue using the existing implementation.
+    Phase 3+: Enhance to support Responses API tools.
+    """
+
+    def __init__(self):
+        # Existing implementation is maintained for Phase 1-2
+        self._tools = {}  # In-memory storage for Phase 1-2
+        self._pinecone_initialized = False
+        self._pinecone_index = None
+
+        # Initialize Pinecone if API key is available
+        if hasattr(settings, 'pinecone_api_key') and settings.pinecone_api_key:
+            self._init_pinecone()
+
+    # Phase 3+: Add Responses API support
+    async def get_tools_for_responses_api(self, capability_description: str = None) -> List[Dict]:
+        """
+        Get tools in Responses API format.
+        Will be implemented in Phase 3.
+        """
+        if capability_description:
+            # Search for tools matching the capability
+            tools = await self.search_by_capability(capability_description)
+        else:
+            # Get all tools
+            tools = list(self._tools.values())
+
+        # Convert to Responses API format
+        responses_api_tools = []
+        function_builder = FunctionBuilder()
+
+        for tool in tools:
+            # Get the function definition
+            function_def = await self._get_function_definition(tool.function_id)
+
+            # Convert to Responses API format
+            if function_def:
+                tool_schema = function_builder.generate_responses_api_tool_schema(function_def)
+                responses_api_tools.append(tool_schema)
+
+        return responses_api_tools
+
+    async def _get_function_definition(self, function_id: str) -> Optional[FunctionDefinition]:
+        """Get a function definition by ID."""
+        # Implementation details
+        pass
+```
+
+## 3. OpenAI Responses API Integration
+
+### 3.1 Overview
+The OpenAI Responses API provides enhanced capabilities for building agents that can use tools, make decisions, and perform structured interactions. Starting with Phase 3, ATIA will transition to leveraging these capabilities while maintaining compatibility with the existing codebase.
+
+### 3.2 Integration Strategy
+
+#### 3.2.1 Phase 1-2: Minimal Changes
+During Phases 1-2, maintain the existing implementation with minimal modifications:
+
+```python
+# Updated utility function in atia/utils/openai_client.py
+# Continue using the existing function with backwards compatibility
+
+def get_completion(
+    prompt: str,
+    system_message: str = "You are a helpful AI assistant.",
+    temperature: float = settings.openai_temperature,
+    max_tokens: int = settings.openai_max_tokens,
+    model: str = settings.openai_model,
+) -> str:
+    """
+    Get a completion from the OpenAI API with retry logic.
+    Maintained for backward compatibility in Phases 1-2.
+    """
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Error calling OpenAI API: {e}")
+        raise
+```
+
+#### 3.2.2 Phase 3: Dual Implementation
+In Phase 3, implement parallel functions using the Responses API while maintaining existing functionality:
+
+```python
+async def get_completion_with_responses_api(
+    prompt: str,
+    system_message: str = "You are a helpful AI assistant.",
+    temperature: float = settings.openai_temperature,
+    tools: List[Dict] = None,
+    model: str = settings.openai_model,
+) -> Dict:
+    """
+    Get a completion using the Responses API.
+    Will be implemented in Phase 3.
+    """
+    client = OpenAI(api_key=settings.openai_api_key)
+
+    messages = [{"role": "user", "content": prompt}]
+
+    response = client.beta.threads.create_and_run(
+        messages=messages,
+        tools=tools or [],
+        model=model,
+        instructions=system_message
+    )
+
+    # Wait for completion
+    run = _wait_for_completion(client, response.id)
+
+    # Process the response
+    return _process_responses_api_output(client, run)
+
+def _wait_for_completion(client, run_id: str):
+    """Poll for completion of a Responses API run."""
+    # Implementation details
+    pass
+
+def _process_responses_api_output(client, run) -> Dict:
+    """Process the output from a Responses API run."""
+    # Implementation details
+    pass
+```
+
+#### 3.2.3 Phase 4: Full Transition
+In Phase 4, fully transition to the Responses API as the primary interface:
+
+```python
+# atia/utils/openai_client.py in Phase 4
+
+# Legacy function maintained for backward compatibility
+def get_completion(
+    prompt: str,
+    system_message: str = "You are a helpful AI assistant.",
+    temperature: float = settings.openai_temperature,
+    max_tokens: int = settings.openai_max_tokens,
+    model: str = settings.openai_model,
+) -> str:
+    """
+    Legacy function that now uses the Responses API internally.
+    Maintained for backward compatibility.
+    """
+    # Internally uses the Responses API
+    result = get_completion_with_responses_api(
+        prompt=prompt,
+        system_message=system_message,
+        temperature=temperature,
+        model=model
+    )
+
+    # Extract text content for backward compatibility
+    return result.get("content", "")
+```
+
+### 3.3 Tool Execution Framework
+In Phase 3, implement a framework for executing tools registered with the Responses API:
+
+```python
+class ToolExecutor:
+    """
+    Handles execution of tools requested by the Responses API.
+    Will be implemented in Phase 3.
+    """
+
+    def __init__(self, tool_registry):
+        self.tool_registry = tool_registry
+
+    async def execute_tool(self, tool_call: Dict) -> Dict:
+        """
+        Execute a tool based on a Responses API tool call.
+        """
+        function_name = tool_call["function"]["name"]
+        arguments = json.loads(tool_call["function"]["arguments"])
+
+        # Find the tool in the registry
+        tool = await self.tool_registry.get_tool_by_name(function_name)
+        if not tool:
+            return {
+                "tool_call_id": tool_call["id"],
+                "output": f"Error: Tool '{function_name}' not found."
+            }
+
+        try:
+            # Execute the tool
+            function_def = await self.tool_registry._get_function_definition(tool.function_id)
+
+            # Create a callable function from the code
+            func_code = function_def.code
+            namespace = {}
+            exec(func_code, namespace)
+
+            # Get the function object
+            func = namespace[function_name]
+
+            # Call the function with arguments
+            result = await func(**arguments)
+
+            return {
+                "tool_call_id": tool_call["id"],
+                "output": json.dumps(result)
+            }
+        except Exception as e:
+            return {
+                "tool_call_id": tool_call["id"],
+                "output": f"Error executing tool: {str(e)}"
+            }
+```
+
+## 4. Data Flow
+
+### 4.1 Main Processing Flow
+The data flow will be updated to integrate with the Responses API in Phase 3:
+
+1. **User Query Intake**
+   - User submits query to ATIA
+   - System captures context and any constraints
+
+2. **Need Identification**
+   - Query analyzed to detect tool needs
+   - If need identified, continue to API Discovery
+   - If existing tool matches need, retrieve from registry
+
+3. **API Discovery**
+   - Search for APIs matching identified need
+   - Select top candidate APIs
+   - Fetch documentation URLs
+
+4. **Documentation Comprehension**
+   - Retrieve and parse API documentation
+   - Extract endpoints, parameters, authentication requirements
+   - Structure data for function generation
+
+5. **Account and Key Management**
+   - Request user consent for account creation
+   - Register account using appropriate handler
+   - Securely store credentials
+
+6. **Function Definition**
+   - Generate function code based on API endpoints
+   - Create Responses API compatible tool schemas (Phase 3+)
+   - Validate function against documentation examples
+
+7. **Tool Registration**
+   - Register function in tool registry
+   - Index for future retrieval
+   - Initialize usage statistics
+
+8. **Tool Execution with Responses API (Phase 3+)**
+   - Create Responses API thread with relevant tools
+   - Process tool calls from the API
+   - Execute tools and provide results back to the API
+   - Return final response to user
+
+### 4.2 State Transitions
+State transitions remain the same through Phase 2, with enhanced Responses API integration in Phase 3:
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ Initial     │    │ Need        │    │ API         │    │ Document    │
+│ Query       ├───►│ Identified  ├───►│ Selected    ├───►│ Processed   │
+└─────────────┘    └─────────────┘    └─────────────┘    └──────┬──────┘
+                                                                 │
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐           │
+│ Response    │    │ Tool        │    │ Function    │    ┌──────▼──────┐
+│ Generated   │◄───┤ Registered  │◄───┤ Created     │◄───┤ Credentials │
+└─────────────┘    └─────────────┘    └─────────────┘    │ Obtained    │
+                                                         └─────────────┘
+```
+
+## 5. Development Roadmap
+
+### 5.1 Phase 1: Foundation (Weeks 1-4)
+**Maintain existing implementation with minimal changes**
+
+#### 5.1.1 Core Components
+- Implement Need Identification component
+- Develop basic API Discovery with single search provider
+- Create initial Documentation Processor for OpenAPI docs
+- Set up testing framework and CI pipeline
+
+#### 5.1.2 Deliverables
+- Need identification with 80% accuracy on test queries
+- API discovery with Google and GitHub search
+- Documentation processing for well-structured OpenAPI specs
+- Basic unit and integration tests
+
+### 5.2 Phase 2: Key Integration (Weeks 5-8)
+**Continue using existing implementation while preparing for Responses API transition**
+
+#### 5.2.1 Core Components
+- Implement Account Manager with basic registration capabilities
+- Develop Function Builder for REST API endpoints
+- Create Tool Registry for storing and retrieving tools
+- Implement security measures for credential handling
+
+#### 5.2.2 Deliverables
+- Account creation for standard API key authentication
+- Function generation for GET and POST endpoints
+- Secure credential storage with encryption
+- Extended test coverage for new components
+- Preparation for Responses API integration in Phase 3
+
+### 5.3 Phase 3: Responses API Integration (Weeks 9-12)
+**Begin transition to Responses API while maintaining backward compatibility**
+
+#### 5.3.1 Core Components
+- Implement parallel OpenAI client utilities using Responses API
+- Update Function Builder to generate Responses API compatible tool schemas
+- Create ToolExecutor for handling Responses API tool calls
+- Update Tool Registry to support Responses API tools
+
+#### 5.3.2 Deliverables
+- Dual implementation supporting both standard and Responses API
+- Tool execution framework for Responses API
+- Enhanced function generation with Responses API compatibility
+- Integration tests for Responses API components
+
+### 5.4 Phase 4: Advanced Processing (Weeks 13-16)
+**Complete transition to Responses API for core functionality**
+
+#### 5.4.1 Core Components
+- Fully transition Agent Core to use Responses API
+- Implement advanced Documentation Processor using Responses API
+- Enhance API Discovery with Responses API capabilities
+- Develop enhanced error handling and validation for Responses API
+
+#### 5.4.2 Deliverables
+- Agent Core powered by Responses API
+- Support for diverse documentation formats
+- Robust tool generation and execution
+- Comprehensive integration tests for the full pipeline
+
+### 5.5 Phase 5: Production Readiness (Weeks 17-20)
+**Optimize and refine Responses API integration**
+
+#### 5.5.1 Core Components
+- Implement advanced security features
+- Optimize performance and response times
+- Add monitoring and analytics
+- Implement feedback mechanisms to improve tool suggestions
+
+#### 5.5.2 Deliverables
+- Production-ready system with hardened security
+- Deployment configurations for cloud environments
+- Monitoring and analytics dashboards
+- Comprehensive documentation
+
+## 6. Testing and Validation
+
+### 6.1 Unit Testing
+Each component will have dedicated test suites, updated to support Responses API:
+
+```python
+# Example: Testing Responses API integration
+@pytest.mark.asyncio
+async def test_responses_api_integration():
+    """Test integration with Responses API."""
+    # Mock Responses API client
+    mock_client = MockResponsesAPIClient()
+
+    # Create a test instance with the mock client
+    agent = AgentCore()
+    agent.client = mock_client
+
+    # Test processing a query
+    result = await agent.process_query_with_responses_api(
+        "Translate this text to French: Hello, world!",
+        tools=[{
+            "type": "function",
+            "function": {
+                "name": "translate_text",
+                "description": "Translate text between languages",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "source_language": {"type": "string"},
+                        "target_language": {"type": "string"}
+                    },
+                    "required": ["text", "target_language"]
+                }
+            }
+        }]
+    )
+
+    # Verify results
+    assert "translated_text" in result
+    assert result["translated_text"] == "Bonjour, monde!"
+```
+
+### 6.2 Integration Testing
+Test the full pipeline with Responses API integration:
+
+```python
+@pytest.mark.asyncio
+async def test_full_pipeline_with_responses_api():
+    """Test the entire integration pipeline with Responses API."""
+    atia = ATIACore(
+        need_identifier=mock_need_identifier,
+        api_discovery=mock_api_discovery,
+        doc_processor=mock_doc_processor,
+        account_manager=mock_account_manager,
+        function_builder=mock_function_builder,
+        tool_registry=mock_tool_registry,
+        tool_executor=mock_tool_executor
+    )
+
+    result = await atia.process_with_responses_api(
+        "I need to analyze sentiment in this text: I love this product!"
+    )
+
+    assert result is not None
+    assert "sentiment" in result
+    assert result["sentiment"] == "positive"
+```
+
+## 7. Conclusion
+
+This revised Technical Specification Document outlines a phased approach to integrating OpenAI's Responses API into the ATIA system while maintaining compatibility with the existing codebase through Phase 2. The plan allows for a smooth transition from the current implementation to a fully Responses API-powered system by Phase 4, leveraging the enhanced capabilities of the new API to achieve the goals outlined in the original specification.
+
+By following this approach, ATIA will be able to take full advantage of the Responses API's capabilities for agent behavior, tool use, and structured outputs, while building on the solid foundation established in the existing codebase.

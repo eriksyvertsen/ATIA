@@ -1,4 +1,14 @@
-from typing import Dict, List, Optional, Union
+"""
+OpenAI client utilities with Responses API support.
+
+This module provides utilities for interacting with OpenAI's API, including
+both standard completions and the new Responses API.
+"""
+
+from typing import Dict, List, Optional, Union, Any
+import json
+import time
+import logging
 
 import openai
 from openai import OpenAI
@@ -8,6 +18,7 @@ from atia.config import settings
 
 # Initialize the OpenAI client
 client = OpenAI(api_key=settings.openai_api_key)
+logger = logging.getLogger(__name__)
 
 
 @retry(wait=wait_exponential(min=1, max=60), stop=stop_after_attempt(5))
@@ -43,7 +54,7 @@ def get_completion(
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"Error calling OpenAI API: {e}")
+        logger.error(f"Error calling OpenAI API: {e}")
         raise
 
 
@@ -84,7 +95,7 @@ def get_json_completion(
         import json
         return json.loads(response.choices[0].message.content)
     except Exception as e:
-        print(f"Error calling OpenAI API for JSON completion: {e}")
+        logger.error(f"Error calling OpenAI API for JSON completion: {e}")
         raise
 
 
@@ -107,5 +118,271 @@ async def get_embedding(text: str, model: str = "text-embedding-ada-002") -> Lis
         )
         return response.data[0].embedding
     except Exception as e:
-        print(f"Error getting embedding: {e}")
+        logger.error(f"Error getting embedding: {e}")
         raise
+
+
+# New Responses API functions
+@retry(wait=wait_exponential(min=1, max=60), stop=stop_after_attempt(5))
+async def get_completion_with_responses_api(
+    prompt: str,
+    system_message: str = "You are a helpful AI assistant.",
+    temperature: float = settings.openai_temperature,
+    tools: List[Dict] = None,
+    model: str = settings.openai_model,
+) -> Dict:
+    """
+    Get a completion using the Responses API.
+
+    Args:
+        prompt: The user prompt
+        system_message: The system message
+        temperature: Controls randomness (0-1)
+        tools: List of tools to make available to the model
+        model: The OpenAI model to use
+
+    Returns:
+        The response from the Responses API
+    """
+    try:
+        # Check for assistant_id in settings
+        assistant_id = settings.openai_assistant_id
+        if not assistant_id:
+            # Fallback to standard chat completion if no assistant ID is provided
+            logger.warning("No assistant_id found in settings, falling back to standard chat completion")
+            response_text = get_completion(
+                prompt=prompt,
+                system_message=system_message,
+                temperature=temperature,
+                model=model
+            )
+            return {
+                "content": response_text,
+                "source": "chat_completion"
+            }
+
+        # Create a new thread
+        thread = client.beta.threads.create()
+        logger.info(f"Created thread: {thread.id}")
+
+        # Add a message to the thread
+        client.beta.threads.messages.create(
+            thread_id=thread.id,
+            role="user",
+            content=prompt
+        )
+        logger.info(f"Added message to thread {thread.id}")
+
+        # Create the run with the assistant_id
+        run_params = {
+            "assistant_id": assistant_id,
+            "thread_id": thread.id,
+            "instructions": system_message,
+            "temperature": temperature,
+        }
+
+        if tools:
+            # For assistants with tools, we need to set the tools parameter differently
+            # Here we'd need to modify the assistant's tools before running
+            # For now, we'll just log a warning
+            logger.warning("Tools parameter specified but cannot be directly applied to assistant runs")
+
+        run = client.beta.threads.runs.create(**run_params)
+        logger.info(f"Created run: {run.id} for thread: {thread.id} with assistant: {assistant_id}")
+
+        # Wait for the run to complete
+        result = await _wait_for_run_completion(thread.id, run.id)
+
+        return result
+    except Exception as e:
+        logger.error(f"Error calling OpenAI Responses API: {e}")
+        raise
+
+
+async def _wait_for_run_completion(thread_id: str, run_id: str) -> Dict:
+    """
+    Wait for a run to complete and process the results.
+
+    Args:
+        thread_id: The thread ID
+        run_id: The run ID
+
+    Returns:
+        The processed response
+    """
+    max_polling_attempts = 60  # Prevent infinite loops
+    polling_attempts = 0
+
+    while polling_attempts < max_polling_attempts:
+        polling_attempts += 1
+
+        try:
+            # Check the run status
+            run = client.beta.threads.runs.retrieve(
+                thread_id=thread_id,
+                run_id=run_id
+            )
+
+            if run.status == "completed":
+                logger.info(f"Run {run_id} completed successfully")
+                # Get the messages from the thread
+                messages = client.beta.threads.messages.list(
+                    thread_id=thread_id
+                )
+
+                # Process the messages to get the final result
+                # (Get the last assistant message)
+                assistant_messages = [msg for msg in messages.data if msg.role == "assistant"]
+
+                if assistant_messages:
+                    latest_msg = assistant_messages[0]
+
+                    # Extract text content
+                    content = ""
+                    for content_part in latest_msg.content:
+                        if content_part.type == "text":
+                            content += content_part.text.value
+
+                    return {
+                        "content": content,
+                        "thread_id": thread_id,
+                        "run_id": run_id
+                    }
+
+                return {"content": "", "thread_id": thread_id, "run_id": run_id}
+
+            elif run.status == "requires_action":
+                logger.info(f"Run {run_id} requires action (tool calls)")
+                # This will be handled by execute_tools_in_run
+                return {
+                    "status": "requires_action",
+                    "thread_id": thread_id,
+                    "run_id": run_id,
+                    "required_action": run.required_action
+                }
+
+            elif run.status in ["failed", "cancelled", "expired"]:
+                logger.error(f"Run {run_id} ended with status: {run.status}")
+                return {
+                    "error": f"Run ended with status: {run.status}",
+                    "thread_id": thread_id,
+                    "run_id": run_id
+                }
+            else:
+                # Still running, wait before checking again
+                time.sleep(1)
+
+        except Exception as e:
+            logger.error(f"Error checking run status: {e}")
+            return {"error": str(e), "thread_id": thread_id, "run_id": run_id}
+
+    logger.error(f"Max polling attempts reached for run {run_id}")
+    return {"error": "Max polling attempts reached", "thread_id": thread_id, "run_id": run_id}
+
+
+async def execute_tools_in_run(
+    thread_id: str, 
+    run_id: str, 
+    tool_executor,
+    max_iterations: int = 10
+) -> Dict:
+    """
+    Execute tools for a run and return the final result.
+
+    Args:
+        thread_id: The thread ID
+        run_id: The run ID
+        tool_executor: The ToolExecutor instance
+        max_iterations: Maximum number of tool execution iterations
+
+    Returns:
+        The final response after tool execution
+    """
+    iteration = 0
+
+    while iteration < max_iterations:
+        iteration += 1
+        logger.info(f"Tool execution iteration {iteration} for run {run_id}")
+
+        try:
+            # Check the run status
+            run = client.beta.threads.runs.retrieve(
+                thread_id=thread_id,
+                run_id=run_id
+            )
+
+            if run.status == "completed":
+                logger.info(f"Run {run_id} completed")
+                # Get the messages from the thread
+                messages = client.beta.threads.messages.list(
+                    thread_id=thread_id
+                )
+
+                # Process the messages to get the final result
+                assistant_messages = [msg for msg in messages.data if msg.role == "assistant"]
+
+                if assistant_messages:
+                    latest_msg = assistant_messages[0]
+
+                    # Extract text content
+                    content = ""
+                    for content_part in latest_msg.content:
+                        if content_part.type == "text":
+                            content += content_part.text.value
+
+                    return {
+                        "content": content,
+                        "thread_id": thread_id,
+                        "run_id": run_id
+                    }
+
+                return {"content": "", "thread_id": thread_id, "run_id": run_id}
+
+            elif run.status == "requires_action":
+                logger.info(f"Run {run_id} requires action - executing tools")
+                # Handle tool calls
+                tool_calls = run.required_action.submit_tool_outputs.tool_calls
+                tool_outputs = []
+
+                for tool_call in tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = tool_call.function.arguments
+
+                    logger.info(f"Executing tool: {function_name} with args: {function_args}")
+
+                    # Execute the tool using the ToolExecutor
+                    tool_result = await tool_executor.execute_tool({
+                        "id": tool_call.id,
+                        "function": {
+                            "name": function_name,
+                            "arguments": function_args
+                        }
+                    })
+
+                    tool_outputs.append(tool_result)
+
+                logger.info(f"Submitting {len(tool_outputs)} tool outputs for run {run_id}")
+
+                # Submit the tool outputs
+                client.beta.threads.runs.submit_tool_outputs(
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    tool_outputs=tool_outputs
+                )
+
+                # Wait a moment before checking again
+                time.sleep(1)
+
+            elif run.status in ["failed", "cancelled", "expired"]:
+                logger.error(f"Run {run_id} ended with status: {run.status}")
+                return {"error": f"Run ended with status: {run.status}", "thread_id": thread_id, "run_id": run_id}
+            else:
+                # Wait before checking again
+                time.sleep(1)
+
+        except Exception as e:
+            logger.error(f"Error during tool execution: {e}")
+            return {"error": str(e), "thread_id": thread_id, "run_id": run_id}
+
+    logger.error(f"Max iterations reached for run {run_id}")
+    return {"error": "Max iterations reached", "thread_id": thread_id, "run_id": run_id}

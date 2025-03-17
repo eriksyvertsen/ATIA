@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.nano
     pkgs.rustc
     pkgs.pkg-config
     pkgs.openssl

@@ -377,3 +377,57 @@ async def test_{function_name}_success():
             validation_messages.append(f"Syntax error in function code: {str(e)}")
 
         return len(validation_messages) == 0, validation_messages
+
+    def generate_responses_api_tool_schema(self, function_def: FunctionDefinition) -> Dict:
+        """
+        Convert a FunctionDefinition to a Responses API compatible tool schema.
+
+        Args:
+            function_def: The function definition to convert
+
+        Returns:
+            Tool schema compatible with Responses API
+        """
+        tool_schema = {
+            "type": "function",
+            "function": {
+                "name": function_def.name,
+                "description": function_def.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        }
+
+        # Convert parameters to OpenAI's tool schema format
+        for param in function_def.parameters:
+            param_type = param.param_type.value
+
+            # Map Pydantic enum values to JSON Schema types
+            type_mapping = {
+                "string": "string",
+                "integer": "integer",
+                "float": "number",
+                "boolean": "boolean",
+                "array": "array",
+                "object": "object"
+            }
+
+            json_type = type_mapping.get(param_type, "string")
+
+            param_schema = {
+                "type": json_type,
+                "description": param.description
+            }
+
+            if param.default_value is not None:
+                param_schema["default"] = param.default_value
+
+            tool_schema["function"]["parameters"]["properties"][param.name] = param_schema
+
+            if param.required:
+                tool_schema["function"]["parameters"]["required"].append(param.name)
+
+        return tool_schema
