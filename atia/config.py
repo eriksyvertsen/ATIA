@@ -3,6 +3,7 @@ from typing import Dict, Optional
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict  # Import ConfigDict
 
 # Load environment variables from .env file
 load_dotenv()
@@ -39,9 +40,11 @@ class Settings(BaseSettings):
     # Tool need identifier thresholds
     need_identifier_threshold: float = float(os.getenv("NEED_IDENTIFIER_THRESHOLD", "0.75"))
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    # Replace the class-based Config with model_config using ConfigDict
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
 
 
 # Create a global settings instance
