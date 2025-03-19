@@ -38,36 +38,35 @@ class ToolRegistry:
         """Initialize Pinecone for vector search."""
         try:
             import pinecone
-            from pinecone import Pinecone, ServerlessSpec
 
-            # Initialize Pinecone
-            pc = Pinecone(api_key=settings.pinecone_api_key)
+            # Initialize Pinecone with API key and environment
+            pinecone.init(
+                api_key=settings.pinecone_api_key,
+                environment=settings.pinecone_environment or "us-west1-gcp"
+            )
 
             # Check if our index exists, if not create it
             index_name = "atia-tools"
-            existing_indexes = [idx["name"] for idx in pc.list_indexes()]
+            existing_indexes = pinecone.list_indexes()
 
             if index_name not in existing_indexes:
-                # Create a new serverless index
-                pc.create_index(
+                # Create a new index
+                pinecone.create_index(
                     name=index_name,
                     dimension=1536,  # OpenAI's ada embedding dimension
-                    metric="cosine",
-                    spec=ServerlessSpec(
-                        cloud="aws",
-                        region="us-west-2"
-                    )
+                    metric="cosine"
+                    # Note: The ServerlessSpec is no longer required in newer API
                 )
 
             # Connect to the index
-            self._pinecone_index = pc.Index(index_name)
+            self._pinecone_index = pinecone.Index(index_name)
             self._pinecone_initialized = True
             logger.info("Pinecone initialized successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize Pinecone: {e}")
             self._pinecone_initialized = False
-
+            
     async def register_function(self, 
                               function_def: FunctionDefinition, 
                               metadata: Dict[str, Any] = None) -> ToolRegistration:
