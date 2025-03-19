@@ -123,6 +123,11 @@ async def get_embedding(text: str, model: str = "text-embedding-ada-002") -> Lis
 
 
 # New Responses API functions
+"""
+Modified version of get_completion_with_responses_api function.
+Replace this function in atia/utils/openai_client.py
+"""
+
 @retry(wait=wait_exponential(min=1, max=60), stop=stop_after_attempt(5))
 async def get_completion_with_responses_api(
     prompt: str,
@@ -145,22 +150,53 @@ async def get_completion_with_responses_api(
         The response from the Responses API
     """
     try:
-        # Check for assistant_id in settings
+        # Check for valid assistant_id in settings
         assistant_id = settings.openai_assistant_id
-        if not assistant_id:
-            # Fallback to standard chat completion if no assistant ID is provided
-            logger.warning("No assistant_id found in settings, falling back to standard chat completion")
-            response_text = get_completion(
-                prompt=prompt,
-                system_message=system_message,
-                temperature=temperature,
-                model=model
-            )
-            return {
-                "content": response_text,
-                "source": "chat_completion"
+        if not assistant_id or not assistant_id.startswith("asst_"):
+            # Use direct chat completions API with tool calling instead
+            logger.info("No valid assistant_id found, using direct chat completions with tool calling")
+
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ]
+
+            # Create parameters for chat completion
+            params = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
             }
 
+            # Add tools if provided
+            if tools:
+                params["tools"] = tools
+                # Tell the model it can call functions
+                params["tool_choice"] = "auto"
+
+            response = client.chat.completions.create(**params)
+
+            # Check if the response contains tool calls
+            if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
+                # There are tool calls to execute
+                return {
+                    "status": "requires_action",
+                    "thread_id": "direct_" + str(time.time()),  # Create a fake thread ID
+                    "run_id": "direct_" + str(time.time()),     # Create a fake run ID
+                    "required_action": {
+                        "submit_tool_outputs": {
+                            "tool_calls": response.choices[0].message.tool_calls
+                        }
+                    }
+                }
+            else:
+                # No tool calls, just return the content
+                return {
+                    "content": response.choices[0].message.content,
+                    "source": "chat_completion"
+                }
+
+        # Use the Assistants API if we have a valid assistant ID
         # Create a new thread
         thread = client.beta.threads.create()
         logger.info(f"Created thread: {thread.id}")
@@ -181,10 +217,8 @@ async def get_completion_with_responses_api(
             "temperature": temperature,
         }
 
+        # Note: Tools are configured on the assistant itself, not passed directly here
         if tools:
-            # For assistants with tools, we need to set the tools parameter differently
-            # Here we'd need to modify the assistant's tools before running
-            # For now, we'll just log a warning
             logger.warning("Tools parameter specified but cannot be directly applied to assistant runs")
 
         run = client.beta.threads.runs.create(**run_params)

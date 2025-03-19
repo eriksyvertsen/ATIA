@@ -3,3 +3,23 @@ python -m pytest
 
 
 python -m atia "Can you help me find an API to translate text from English to French?"
+
+
+
+
+Instructions for Running the Tests
+
+First, run the existing Responses API unit tests to ensure they're still passing:
+Copypython -m pytest tests/test_responses_api.py -v
+
+Add the end-to-end integration tests:
+Copypython -m pytest tests/test_end_to_end_responses_api.py -v
+
+Add the error handling tests:
+Copypython -m pytest tests/test_responses_api_error_handling.py -v
+
+Run the test utility script to test the full flow:
+Copypython test_responses_api.py
+
+Run the benchmark script to compare performance:
+Copypython benchmark_atia.py

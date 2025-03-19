@@ -1,0 +1,20 @@
+{
+  "id": "456aaafd-9a38-484a-8d91-053ac4ed9ea1",
+  "name": "echo_function",
+  "description": "Echo back the input message",
+  "function_id": "e05de749-9e10-434f-8ba4-34d046beafe5",
+  "api_source_id": "test_api",
+  "capability_tags": [
+    "test",
+    "echo"
+  ],
+  "metadata": {
+    "endpoint": "/echo",
+    "method": "GET",
+    "api_type": "rest"
+  },
+  "usage_count": 0,
+  "created_at": "2025-03-18T02:30:28.671207",
+  "updated_at": "2025-03-18T02:30:28.671209",
+  "last_used": null
+}
