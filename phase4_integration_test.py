@@ -176,6 +176,8 @@ class IntegrationTest:
             if error:
                 self.logger.error(f"  Error: {error}")
 
+    # In phase4_integration_test.py, modify test_agent_core_with_cache:
+
     async def test_agent_core_with_cache(self) -> None:
         """Test Agent Core with caching mechanism."""
         test_name = "Agent Core with Cache"
@@ -185,21 +187,26 @@ class IntegrationTest:
             # Use a query that should be cacheable
             query = "What's the weather like in Paris?"
 
+            # Initialize agent with specific cache instance for testing
+            test_cache = ResponseCache()
+            test_agent = AgentCore(tool_registry=self.tool_registry)
+            test_agent.cache = test_cache  # Use the test cache instance
+
             # First query should miss cache
             start_time = time.time()
-            response1 = await self.agent_core.process_query(query)
+            response1 = await test_agent.process_query(query)
             first_query_time = time.time() - start_time
 
             # Check cache statistics before second query
-            cache_stats_before = self.response_cache.stats()
+            cache_stats_before = test_cache.stats()
 
             # Second query should hit cache
             start_time = time.time()
-            response2 = await self.agent_core.process_query(query)
+            response2 = await test_agent.process_query(query)
             second_query_time = time.time() - start_time
 
             # Check cache statistics after second query
-            cache_stats_after = self.response_cache.stats()
+            cache_stats_after = test_cache.stats()
 
             # Verify cache hit
             cache_hit = cache_stats_after["hits"] > cache_stats_before["hits"]
@@ -226,14 +233,13 @@ class IntegrationTest:
                     "cache_stats_after": cache_stats_after
                 }
             )
-
         except Exception as e:
             self.record_result(
                 test_name=test_name,
                 passed=False,
                 error=e
             )
-
+            
     async def test_need_identifier_with_error_handling(self) -> None:
         """Test Need Identifier with error handling."""
         test_name = "Need Identifier with Error Handling"
