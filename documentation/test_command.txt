@@ -1,25 +1,37 @@
 python -m pytest
 
 
-
 python -m atia "Can you help me find an API to translate text from English to French?"
 
+#######
+PHASE 3 TESTS
 
+Usage Instructions
+Save the script as run_tests.py and make it executable:
+bashCopychmod +x run_tests.py
+Run specific test categories:
+bashCopy# Run all tests
+python run_tests.py --all
 
+# Run only core component tests (Phase 1-2)
+python run_tests.py --core
 
-Instructions for Running the Tests
+# Run only Responses API tests (Phase 3)
+python run_tests.py --responses
 
-First, run the existing Responses API unit tests to ensure they're still passing:
-Copypython -m pytest tests/test_responses_api.py -v
+# Run only end-to-end tests
+python run_tests.py --e2e
 
-Add the end-to-end integration tests:
-Copypython -m pytest tests/test_end_to_end_responses_api.py -v
+# Run only manual test scripts
+python run_tests.py --manual
 
-Add the error handling tests:
-Copypython -m pytest tests/test_responses_api_error_handling.py -v
-
-Run the test utility script to test the full flow:
-Copypython test_responses_api.py
+# Run multiple categories
+python run_tests.py --core --responses
+If you run the script without arguments, it will run all tests:
+bashCopypython run_tests.py
+This script provides a comprehensive way to test your entire codebase while also allowing you to focus on specific areas as needed during development.
+#######
+Instructions for Running Benchmark
 
 Run the benchmark script to compare performance:
 Copypython benchmark_atia.py

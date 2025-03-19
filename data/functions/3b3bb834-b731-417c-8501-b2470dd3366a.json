@@ -1,0 +1,26 @@
+{
+  "id": "3b3bb834-b731-417c-8501-b2470dd3366a",
+  "name": "echo_function",
+  "description": "Echo back the input message",
+  "api_source_id": "test_api",
+  "api_type": "rest",
+  "parameters": [
+    {
+      "name": "message",
+      "param_type": "string",
+      "description": "The message to echo back",
+      "required": true,
+      "default_value": null
+    }
+  ],
+  "code": "\nasync def echo_function(message: str):\n    \"\"\"\n    Echo back the input message.\n\n    Args:\n        message: The message to echo back\n\n    Returns:\n        Dict with the echoed message\n    \"\"\"\n    return {\"message\": message, \"status\": \"success\"}\n",
+  "endpoint": "/echo",
+  "method": "GET",
+  "response_format": {},
+  "tags": [
+    "test",
+    "echo"
+  ],
+  "created_at": "2025-03-19T01:50:04.626412",
+  "updated_at": "2025-03-19T01:50:04.626424"
+}

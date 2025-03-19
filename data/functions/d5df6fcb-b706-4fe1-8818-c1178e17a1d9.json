@@ -1,0 +1,26 @@
+{
+  "id": "d5df6fcb-b706-4fe1-8818-c1178e17a1d9",
+  "name": "weather_lookup",
+  "description": "Look up weather information for a city",
+  "api_source_id": "weather_api",
+  "api_type": "rest",
+  "parameters": [
+    {
+      "name": "city",
+      "param_type": "string",
+      "description": "The city to look up weather for",
+      "required": true,
+      "default_value": null
+    }
+  ],
+  "code": "\nasync def weather_lookup(city: str):\n    \"\"\"\n    Look up weather information for a city.\n\n    Args:\n        city: The city to look up weather for\n\n    Returns:\n        Weather information\n    \"\"\"\n    # In a real implementation, this would make an API call\n    # For testing, we'll return mock data\n    return {\n        \"city\": city,\n        \"temperature\": 22,\n        \"conditions\": \"Sunny\",\n        \"humidity\": 65\n    }\n",
+  "endpoint": "/weather",
+  "method": "GET",
+  "response_format": {},
+  "tags": [
+    "weather",
+    "lookup"
+  ],
+  "created_at": "2025-03-19T01:47:17.556023",
+  "updated_at": "2025-03-19T01:47:17.556031"
+}

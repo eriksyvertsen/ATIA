@@ -1,0 +1,26 @@
+{
+  "id": "8c893128-a337-46f0-bfe3-29d1e3c03448",
+  "name": "test_function",
+  "description": "A test function",
+  "api_source_id": "test_api",
+  "api_type": "rest",
+  "parameters": [
+    {
+      "name": "test_param",
+      "param_type": "string",
+      "description": "A test parameter",
+      "required": true,
+      "default_value": null
+    }
+  ],
+  "code": "async def test_function(test_param: str): return test_param",
+  "endpoint": "/test",
+  "method": "GET",
+  "response_format": {},
+  "tags": [
+    "test",
+    "example"
+  ],
+  "created_at": "2025-03-19T01:41:52.860511",
+  "updated_at": "2025-03-19T01:41:52.860516"
+}

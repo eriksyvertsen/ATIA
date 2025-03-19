@@ -1,0 +1,20 @@
+{
+  "id": "d42c02a5-4c88-4297-b305-6879841a8e02",
+  "name": "weather_lookup",
+  "description": "Look up weather information for a city",
+  "function_id": "d5df6fcb-b706-4fe1-8818-c1178e17a1d9",
+  "api_source_id": "weather_api",
+  "capability_tags": [
+    "weather",
+    "lookup"
+  ],
+  "metadata": {
+    "endpoint": "/weather",
+    "method": "GET",
+    "api_type": "rest"
+  },
+  "usage_count": 0,
+  "created_at": "2025-03-19T01:47:17.743406",
+  "updated_at": "2025-03-19T01:47:17.743409",
+  "last_used": null
+}
