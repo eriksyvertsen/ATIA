@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.unixtools.ping
     pkgs.nano
     pkgs.rustc
     pkgs.pkg-config
