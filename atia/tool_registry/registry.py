@@ -14,6 +14,7 @@ from atia.tool_registry.models import ToolRegistration
 from atia.function_builder.models import FunctionDefinition
 from atia.utils.openai_client import get_embedding
 from atia.config import settings
+from atia.utils.vector_store import FileVectorStore  # Import the FileVectorStore
 
 
 logger = logging.getLogger(__name__)
@@ -26,13 +27,27 @@ class ToolRegistry:
 
     def __init__(self):
         """Initialize the Tool Registry."""
-        self._tools = {}  # In-memory storage for Phase 2
+        self._tools = {}  # In-memory storage for tools
         self._pinecone_initialized = False
         self._pinecone_index = None
+        self._file_vector_store = None  # Initialize the file vector store as None
+        self.logger = logging.getLogger(__name__)
 
-        # Initialize Pinecone if API key is available
-        if hasattr(settings, 'pinecone_api_key') and settings.pinecone_api_key:
+        # Check if running in Replit environment
+        in_replit = 'REPL_ID' in os.environ or 'REPL_OWNER' in os.environ
+
+        # Initialize vector storage
+        if in_replit:
+            # Use file-based vector store in Replit
+            self.logger.info("Running in Replit environment - using file-based vector store")
+            self._file_vector_store = FileVectorStore()
+        elif settings.enable_vector_db and settings.pinecone_api_key:
+            # Try to initialize Pinecone if not in Replit and settings are enabled
             self._init_pinecone()
+        else:
+            # Fall back to file-based vector store
+            self.logger.info("Vector database disabled or missing API key, using file-based vector store")
+            self._file_vector_store = FileVectorStore()
 
     def _init_pinecone(self):
         """Initialize Pinecone for vector search."""
@@ -42,31 +57,53 @@ class ToolRegistry:
             # Initialize Pinecone with API key and environment
             pinecone.init(
                 api_key=settings.pinecone_api_key,
-                environment=settings.pinecone_environment or "us-west1-gcp"
+                environment=settings.pinecone_environment or "us-east-1"
             )
+
+            # Log the initialization attempt
+            self.logger.info(f"Initializing Pinecone with environment: {settings.pinecone_environment}")
 
             # Check if our index exists, if not create it
             index_name = "atia-tools"
-            existing_indexes = pinecone.list_indexes()
+
+            # List existing indexes
+            try:
+                existing_indexes = pinecone.list_indexes()
+                self.logger.info(f"Existing Pinecone indexes: {existing_indexes}")
+            except Exception as e:
+                self.logger.error(f"Failed to list Pinecone indexes: {e}")
+                existing_indexes = []
 
             if index_name not in existing_indexes:
                 # Create a new index
-                pinecone.create_index(
-                    name=index_name,
-                    dimension=1536,  # OpenAI's ada embedding dimension
-                    metric="cosine"
-                    # Note: The ServerlessSpec is no longer required in newer API
-                )
+                try:
+                    pinecone.create_index(
+                        name=index_name,
+                        dimension=1536,  # OpenAI's ada embedding dimension
+                        metric="cosine"
+                    )
+                    self.logger.info(f"Created new Pinecone index: {index_name}")
+                except Exception as e:
+                    self.logger.error(f"Failed to create Pinecone index: {e}")
+                    self._pinecone_initialized = False
+                    return
 
             # Connect to the index
-            self._pinecone_index = pinecone.Index(index_name)
-            self._pinecone_initialized = True
-            logger.info("Pinecone initialized successfully")
+            try:
+                self._pinecone_index = pinecone.Index(index_name)
+                self._pinecone_initialized = True
+                self.logger.info("Pinecone initialized successfully")
+            except Exception as e:
+                self.logger.error(f"Failed to connect to Pinecone index: {e}")
+                self._pinecone_initialized = False
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Pinecone: {e}")
+        except ImportError:
+            self.logger.warning("Pinecone package not installed, skipping vector search initialization")
             self._pinecone_initialized = False
-            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize Pinecone: {e}")
+            self._pinecone_initialized = False
+
     async def register_function(self, 
                               function_def: FunctionDefinition, 
                               metadata: Dict[str, Any] = None) -> ToolRegistration:
@@ -107,6 +144,25 @@ class ToolRegistry:
         # Store in memory
         self._tools[tool.id] = tool
 
+        # Store in file vector store if available
+        if self._file_vector_store is not None and embedding:
+            try:
+                self._file_vector_store.upsert(
+                    vectors=[{
+                        "id": tool.id,
+                        "values": embedding,
+                        "metadata": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "tags": ",".join(tool.capability_tags),
+                            "api_source_id": tool.api_source_id
+                        }
+                    }]
+                )
+                self.logger.info(f"Stored embedding for tool {tool.id} in file vector store")
+            except Exception as e:
+                self.logger.error(f"Failed to store embedding in file vector store: {e}")
+
         # Store in Pinecone if available
         if self._pinecone_initialized and embedding:
             try:
@@ -122,10 +178,11 @@ class ToolRegistry:
                         }
                     }]
                 )
+                self.logger.info(f"Stored embedding for tool {tool.id} in Pinecone")
             except Exception as e:
-                logger.error(f"Failed to store embedding in Pinecone: {e}")
+                self.logger.error(f"Failed to store embedding in Pinecone: {e}")
 
-        # Store in file (simple implementation for Phase 2)
+        # Store in file (simple implementation for persistence)
         os.makedirs("data/tools", exist_ok=True)
         with open(f"data/tools/{tool.id}.json", "w") as f:
             # Convert to dict manually to handle datetime serialization
@@ -162,12 +219,36 @@ class ToolRegistry:
         Returns:
             List of matching tools
         """
-        # Generate embedding for the capability description
-        embedding = await get_embedding(capability_description)
+        try:
+            # Generate embedding for the capability description
+            embedding = await get_embedding(capability_description)
+        except Exception as e:
+            self.logger.warning(f"Failed to generate embedding: {e}")
+            embedding = None
 
-        # Search using Pinecone if available
+        # Try file-based vector store first
+        if self._file_vector_store is not None and embedding:
+            try:
+                self.logger.info("Searching using file-based vector store")
+                results = self._file_vector_store.query(
+                    vector=embedding,
+                    top_k=top_k,
+                    include_metadata=True
+                )
+
+                tool_ids = [match['id'] for match in results['matches']]
+                file_results = [self._tools[tid] for tid in tool_ids if tid in self._tools]
+
+                if file_results:
+                    self.logger.info(f"Found {len(file_results)} results via file-based vector store")
+                    return file_results
+            except Exception as e:
+                self.logger.warning(f"File-based vector search failed: {e}, falling back to direct search")
+
+        # Try Pinecone if initialized and embedding exists
         if self._pinecone_initialized and embedding:
             try:
+                self.logger.info("Searching using Pinecone")
                 results = self._pinecone_index.query(
                     vector=embedding,
                     top_k=top_k,
@@ -175,11 +256,16 @@ class ToolRegistry:
                 )
 
                 tool_ids = [match['id'] for match in results['matches']]
-                return [self._tools[tid] for tid in tool_ids if tid in self._tools]
+                pinecone_results = [self._tools[tid] for tid in tool_ids if tid in self._tools]
+
+                if pinecone_results:
+                    self.logger.info(f"Found {len(pinecone_results)} results via Pinecone")
+                    return pinecone_results
             except Exception as e:
-                logger.error(f"Pinecone search failed: {e}")
+                self.logger.warning(f"Pinecone search failed: {e}, falling back to direct search")
 
         # Fallback to simple tag-based search
+        self.logger.info("Using fallback tag-based search")
         matches = []
         for tool in self._tools.values():
             # Calculate relevance score based on tag matches
@@ -263,7 +349,7 @@ class ToolRegistry:
             embedding = await get_embedding(text)
             return embedding
         except Exception as e:
-            logger.error(f"Failed to generate embedding: {e}")
+            self.logger.error(f"Failed to generate embedding: {e}")
             return None
 
     def _save_function_definition(self, function_def: FunctionDefinition) -> None:

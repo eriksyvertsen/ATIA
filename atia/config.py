@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     max_cache_size: int = int(os.getenv("MAX_CACHE_SIZE", "1000"))
 
     # Vector DB settings
-    enable_vector_db: bool = os.getenv("ENABLE_VECTOR_DB", "True").lower() == "true"
+    enable_vector_db: bool = os.getenv("ENABLE_VECTOR_DB", "False").lower() == "true".lower() == "true"
     pinecone_api_key: Optional[str] = os.getenv("PINECONE_API_KEY", "")
     pinecone_environment: Optional[str] = os.getenv("PINECONE_ENVIRONMENT", "")
 
