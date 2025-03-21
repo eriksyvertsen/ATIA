@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expiration_seconds: int = int(os.getenv("JWT_EXPIRATION_SECONDS", "3600"))
 
+
+    # Authentication settings
+    atia_admin_password: str = os.getenv("ATIA_ADMIN_PASSWORD", "atia_admin")
+
+    # Feedback system settings
+    feedback_storage_dir: str = os.getenv("FEEDBACK_STORAGE_DIR", "data/feedback")
+    feedback_min_samples: int = int(os.getenv("FEEDBACK_MIN_SAMPLES", "3"))
+    feedback_analysis_ttl_hours: int = int(os.getenv("FEEDBACK_ANALYSIS_TTL_HOURS", "24"))
+    feedback_enable_auto_analysis: bool = os.getenv("FEEDBACK_ENABLE_AUTO_ANALYSIS", "True").lower() == "true"
     # API Gateway settings
     api_gateway_enabled: bool = os.getenv("API_GATEWAY_ENABLED", "False").lower() == "true"
     api_gateway_host: str = os.getenv("API_GATEWAY_HOST", "0.0.0.0")
@@ -251,3 +260,19 @@ def validate_environment() -> None:
 
 # Auto-validate environment when module is imported
 validate_environment()
+
+# Performance settings
+batch_size: int = int(os.getenv("BATCH_SIZE", "10"))
+parallel_requests: int = int(os.getenv("PARALLEL_REQUESTS", "5"))
+request_timeout_seconds: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "10"))
+max_retries: int = int(os.getenv("MAX_RETRIES", "3"))
+retry_delay_seconds: float = float(os.getenv("RETRY_DELAY_SECONDS", "1.0"))
+retry_backoff: float = float(os.getenv("RETRY_BACKOFF", "2.0"))
+
+# Feedback system settings
+feedback_storage_dir: str = os.getenv("FEEDBACK_STORAGE_DIR", "data/feedback")
+feedback_min_samples: int = int(os.getenv("FEEDBACK_MIN_SAMPLES", "3"))
+feedback_analysis_ttl_hours: int = int(os.getenv("FEEDBACK_ANALYSIS_TTL_HOURS", "24"))
+feedback_enable_auto_analysis: bool = os.getenv("FEEDBACK_ENABLE_AUTO_ANALYSIS", "True").lower() == "true"
+
+# Tool Registry settings

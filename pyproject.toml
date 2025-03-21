@@ -21,6 +21,7 @@ httpx = "^0.25.1"
 cryptography = "^41.0.0"
 boto3 = "^1.28.0"  # Added for AWS integration
 numpy = "^1.26.0"  # Required for vector operations
+uvicorn = "^0.34.0"
 
 [tool.poetry.dev-dependencies]
 black = "^23.11.0"

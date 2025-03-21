@@ -1,0 +1,2 @@
+{"event_type":"query","timestamp":"2025-03-21T11:48:10.059776","user_id":null,"session_id":"s-1742557630","component":"agent_core","duration_ms":59126.00111961365,"metadata":{"has_tool_need":true,"response_length":1286,"query":"Can you help me find an API to translate text from English to French?"}}
+{"event_type":"query","timestamp":"2025-03-21T11:51:04.917667","user_id":null,"session_id":"s-1742557790","component":"agent_core","duration_ms":74447.256565094,"metadata":{"has_tool_need":true,"response_length":315,"query":"La voiture passe sous un pont"}}
