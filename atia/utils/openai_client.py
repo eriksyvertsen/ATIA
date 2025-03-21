@@ -333,6 +333,7 @@ async def execute_tools_in_run(
         The final response after tool execution
     """
     iteration = 0
+    client = OpenAI(api_key=settings.openai_api_key)
 
     while iteration < max_iterations:
         iteration += 1
@@ -374,26 +375,31 @@ async def execute_tools_in_run(
 
             elif run.status == "requires_action":
                 logger.info(f"Run {run_id} requires action - executing tools")
+
                 # Handle tool calls
                 tool_calls = run.required_action.submit_tool_outputs.tool_calls
                 tool_outputs = []
 
                 for tool_call in tool_calls:
-                    function_name = tool_call.function.name
-                    function_args = tool_call.function.arguments
+                    try:
+                        # Execute the tool using the ToolExecutor
+                        tool_result = await tool_executor.execute_tool({
+                            "id": tool_call.id,
+                            "function": {
+                                "name": tool_call.function.name,
+                                "arguments": tool_call.function.arguments
+                            }
+                        })
 
-                    logger.info(f"Executing tool: {function_name} with args: {function_args}")
-
-                    # Execute the tool using the ToolExecutor
-                    tool_result = await tool_executor.execute_tool({
-                        "id": tool_call.id,
-                        "function": {
-                            "name": function_name,
-                            "arguments": function_args
-                        }
-                    })
-
-                    tool_outputs.append(tool_result)
+                        tool_outputs.append(tool_result)
+                        logger.info(f"Tool {tool_call.function.name} executed successfully")
+                    except Exception as e:
+                        logger.error(f"Error executing tool {tool_call.function.name}: {e}")
+                        # Create error response
+                        tool_outputs.append({
+                            "tool_call_id": tool_call.id,
+                            "output": json.dumps({"error": str(e)})
+                        })
 
                 logger.info(f"Submitting {len(tool_outputs)} tool outputs for run {run_id}")
 
@@ -404,15 +410,15 @@ async def execute_tools_in_run(
                     tool_outputs=tool_outputs
                 )
 
-                # Wait a moment before checking again
-                time.sleep(1)
+                # Wait before checking again
+                await asyncio.sleep(1)
 
             elif run.status in ["failed", "cancelled", "expired"]:
                 logger.error(f"Run {run_id} ended with status: {run.status}")
                 return {"error": f"Run ended with status: {run.status}", "thread_id": thread_id, "run_id": run_id}
             else:
                 # Wait before checking again
-                time.sleep(1)
+                await asyncio.sleep(1)
 
         except Exception as e:
             logger.error(f"Error during tool execution: {e}")

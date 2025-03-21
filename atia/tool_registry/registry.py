@@ -14,7 +14,7 @@ from atia.tool_registry.models import ToolRegistration
 from atia.function_builder.models import FunctionDefinition
 from atia.utils.openai_client import get_embedding
 from atia.config import settings
-from atia.utils.vector_store import FileVectorStore  # Import the FileVectorStore
+from atia.utils.vector_store import FileVectorStore
 
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,10 @@ class ToolRegistry:
             # Fall back to file-based vector store
             self.logger.info("Vector database disabled or missing API key, using file-based vector store")
             self._file_vector_store = FileVectorStore()
+
+        # Load existing tools
+        self._load_tools()
+        self.logger.info(f"Loaded {len(self._tools)} tools from storage")
 
     def _init_pinecone(self):
         """Initialize Pinecone for vector search."""
@@ -236,12 +240,13 @@ class ToolRegistry:
                     include_metadata=True
                 )
 
-                tool_ids = [match['id'] for match in results['matches']]
-                file_results = [self._tools[tid] for tid in tool_ids if tid in self._tools]
+                if results and 'matches' in results:
+                    tool_ids = [match['id'] for match in results['matches']]
+                    file_results = [self._tools[tid] for tid in tool_ids if tid in self._tools]
 
-                if file_results:
-                    self.logger.info(f"Found {len(file_results)} results via file-based vector store")
-                    return file_results
+                    if file_results:
+                        self.logger.info(f"Found {len(file_results)} results via file-based vector store")
+                        return file_results
             except Exception as e:
                 self.logger.warning(f"File-based vector search failed: {e}, falling back to direct search")
 
@@ -255,27 +260,47 @@ class ToolRegistry:
                     include_metadata=True
                 )
 
-                tool_ids = [match['id'] for match in results['matches']]
-                pinecone_results = [self._tools[tid] for tid in tool_ids if tid in self._tools]
+                if results and 'matches' in results:
+                    tool_ids = [match['id'] for match in results['matches']]
+                    pinecone_results = [self._tools[tid] for tid in tool_ids if tid in self._tools]
 
-                if pinecone_results:
-                    self.logger.info(f"Found {len(pinecone_results)} results via Pinecone")
-                    return pinecone_results
+                    if pinecone_results:
+                        self.logger.info(f"Found {len(pinecone_results)} results via Pinecone")
+                        return pinecone_results
             except Exception as e:
                 self.logger.warning(f"Pinecone search failed: {e}, falling back to direct search")
 
-        # Fallback to simple tag-based search
-        self.logger.info("Using fallback tag-based search")
+        # Fallback to simple tag-based and text matching search
+        self.logger.info("Using fallback search strategy")
         matches = []
+
+        # Preprocess capability description for matching
+        capability_words = capability_description.lower().split()
+
         for tool in self._tools.values():
-            # Calculate relevance score based on tag matches
-            score = 0
+            # Calculate relevance score based on different factors
+
+            # 1. Tag matches
+            tag_score = 0
             for tag in tool.capability_tags:
                 if tag.lower() in capability_description.lower():
-                    score += 1
+                    tag_score += 1
+            tag_score = tag_score / max(len(tool.capability_tags), 1) if tool.capability_tags else 0
 
-            if score > 0:
-                matches.append((tool, score))
+            # 2. Description similarity (simple word overlap)
+            description_words = tool.description.lower().split()
+            word_matches = sum(1 for word in capability_words if word in description_words)
+            desc_score = word_matches / max(len(capability_words), 1)
+
+            # 3. Consider usage count as a small bonus
+            usage_bonus = min(tool.usage_count / 10, 0.2) if tool.usage_count > 0 else 0
+
+            # Combined score (weighted average)
+            combined_score = (tag_score * 0.5) + (desc_score * 0.4) + usage_bonus
+
+            # Add if score is above threshold
+            if combined_score > 0.1:
+                matches.append((tool, combined_score))
 
         # Sort by relevance score and then by usage count
         matches.sort(key=lambda x: (x[1], x[0].usage_count), reverse=True)
@@ -458,18 +483,15 @@ class ToolRegistry:
         Returns:
             Function definition or None if not found
         """
-        # In a real implementation, this would retrieve from a database
-        # For Phase 3, we'll implement a basic file-based lookup
-
         # Import here to avoid circular imports
         from atia.function_builder.models import FunctionDefinition, ApiType, ParameterType, FunctionParameter
         import os
         import json
 
         # Check if a file with this function_id exists in the functions directory
-        tools_dir = "data/functions"
-        os.makedirs(tools_dir, exist_ok=True)
-        function_file = f"{tools_dir}/{function_id}.json"
+        functions_dir = "data/functions"
+        os.makedirs(functions_dir, exist_ok=True)
+        function_file = f"{functions_dir}/{function_id}.json"
 
         if os.path.exists(function_file):
             try:
@@ -497,6 +519,7 @@ class ToolRegistry:
                     code=func_data.get("code", ""),
                     endpoint=func_data.get("endpoint", ""),
                     method=func_data.get("method", "GET"),
+                    response_format=func_data.get("response_format", {}),
                     tags=func_data.get("tags", [])
                 )
             except Exception as e:
@@ -534,3 +557,43 @@ async def function_{function_id[:8]}(param1: str):
             endpoint="/test",
             method="GET"
         )
+
+    def _load_tools(self) -> None:
+        """Load saved tools from storage."""
+        # Import needed types
+        from atia.tool_registry.models import ToolRegistration
+
+        # Check if tools directory exists
+        tools_dir = "data/tools"
+        if not os.path.exists(tools_dir):
+            os.makedirs(tools_dir, exist_ok=True)
+            return
+
+        # Load all tool files
+        for filename in os.listdir(tools_dir):
+            if filename.endswith(".json"):
+                try:
+                    # Read tool file
+                    with open(os.path.join(tools_dir, filename), 'r') as f:
+                        tool_data = json.load(f)
+
+                    # Create ToolRegistration object
+                    tool = ToolRegistration(
+                        id=tool_data.get("id"),
+                        name=tool_data.get("name"),
+                        description=tool_data.get("description"),
+                        function_id=tool_data.get("function_id"),
+                        api_source_id=tool_data.get("api_source_id"),
+                        capability_tags=tool_data.get("capability_tags", []),
+                        metadata=tool_data.get("metadata", {}),
+                        usage_count=tool_data.get("usage_count", 0),
+                        created_at=datetime.fromisoformat(tool_data.get("created_at")) if tool_data.get("created_at") else datetime.now(),
+                        updated_at=datetime.fromisoformat(tool_data.get("updated_at")) if tool_data.get("updated_at") else datetime.now(),
+                        last_used=datetime.fromisoformat(tool_data.get("last_used")) if tool_data.get("last_used") else None
+                    )
+
+                    # Add to in-memory store
+                    self._tools[tool.id] = tool
+
+                except Exception as e:
+                    self.logger.error(f"Error loading tool {filename}: {e}")

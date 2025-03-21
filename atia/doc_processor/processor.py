@@ -137,6 +137,25 @@ class DocumentationProcessor:
             """
         }
 
+        # Template for endpoints extraction
+        self.endpoint_extraction_template = """
+        For this API, extract all available endpoints with detailed information.
+
+        API Name: {api_name}
+        API Base URL: {base_url}
+        API Description: {description}
+
+        For each endpoint, provide:
+        1. Full path (including base path if applicable)
+        2. HTTP method (GET, POST, PUT, DELETE, etc.)
+        3. Description of what the endpoint does
+        4. All parameters (query, path, body) with names, types, descriptions and whether required
+        5. Response format and example if available
+        6. Authentication requirements
+
+        Return as a structured JSON array of endpoints.
+        """
+
     async def fetch_documentation(self, url: str) -> str:
         """
         Fetch documentation from a URL with caching.
@@ -487,8 +506,6 @@ class DocumentationProcessor:
 
         return api_info
 
-    # In atia/doc_processor/processor.py, update _convert_llm_result_to_api_info:
-
     def _convert_llm_result_to_api_info(self, result: Dict) -> APIInfo:
         """Convert LLM extraction result to APIInfo format."""
         # Create a source_id from hash of base_url
@@ -545,7 +562,7 @@ class DocumentationProcessor:
             description=result.get("description", ""),
             source_id=source_id
         )
-        
+
     async def process_documentation(self, doc_content: str, doc_type: Optional[str] = None, url: Optional[str] = None) -> APIInfo:
         """
         Process API documentation and extract structured information.
@@ -575,6 +592,121 @@ class DocumentationProcessor:
             api_info.source_id = str(hash(url))
 
         return api_info
+
+    async def extract_endpoints(self, api_info: APIInfo) -> List[APIEndpoint]:
+        """
+        Extract detailed endpoint information for an API.
+
+        Args:
+            api_info: Basic API information
+
+        Returns:
+            List of detailed API endpoints
+        """
+        # Check cache first
+        cache_key = f"detailed_endpoints:{api_info.source_id}"
+        cached_endpoints = self.cache.get(cache_key)
+        if cached_endpoints:
+            self.logger.info(f"Using cached endpoints for API {api_info.source_id}")
+            return [APIEndpoint.parse_raw(endpoint) for endpoint in cached_endpoints]
+
+        # If we already have detailed endpoints, return them
+        if api_info.endpoints and len(api_info.endpoints) > 0 and len(api_info.endpoints[0].parameters) > 0:
+            return api_info.endpoints
+
+        # Prepare the prompt for endpoint extraction
+        prompt = self.endpoint_extraction_template.format(
+            api_name=api_info.description.split('\n')[0] if '\n' in api_info.description else api_info.description,
+            base_url=api_info.base_url,
+            description=api_info.description
+        )
+
+        system_message = (
+            "You are an expert API documentation analyst specializing in extracting "
+            "detailed endpoint information from API documentation. Provide complete, "
+            "accurate details for each endpoint in a structured format."
+        )
+
+        # Use Responses API for endpoint extraction if available
+        detailed_endpoints = []
+        try:
+            if not settings.disable_responses_api:
+                response = await get_completion_with_responses_api(
+                    prompt=prompt,
+                    system_message=system_message,
+                    temperature=0.1,
+                    model=settings.openai_model
+                )
+                content = response.get("content", "")
+            else:
+                content = get_completion(
+                    prompt=prompt,
+                    system_message=system_message,
+                    temperature=0.1,
+                    max_tokens=4000,
+                    model=settings.openai_model
+                )
+
+            # Extract JSON from the response
+            json_pattern = r'```json\s*([\s\S]*?)\s*```'
+            match = re.search(json_pattern, content)
+
+            if match:
+                json_str = match.group(1)
+                endpoints_data = json.loads(json_str)
+            else:
+                # Try to parse the entire response as JSON
+                try:
+                    endpoints_data = json.loads(content)
+                except json.JSONDecodeError:
+                    # If that fails, try to extract just a JSON array
+                    array_pattern = r'\[\s*\{.*\}\s*\]'
+                    match = re.search(array_pattern, content, re.DOTALL)
+                    if match:
+                        endpoints_data = json.loads(match.group(0))
+                    else:
+                        # Fall back to existing endpoints with a warning
+                        self.logger.warning(f"Could not extract detailed endpoints from LLM response")
+                        return api_info.endpoints
+
+            # Convert to APIEndpoint objects
+            for endpoint_data in endpoints_data:
+                # Normalize the data structure
+                if isinstance(endpoint_data, dict):
+                    # Extract parameters
+                    parameters = []
+                    for param in endpoint_data.get("parameters", []):
+                        if isinstance(param, dict):
+                            parameters.append({
+                                "name": param.get("name", ""),
+                                "parameter_type": param.get("type", "string"),
+                                "required": param.get("required", False),
+                                "description": param.get("description", ""),
+                                "location": param.get("in", "query")
+                            })
+
+                    # Create endpoint
+                    detailed_endpoints.append(APIEndpoint(
+                        path=endpoint_data.get("path", ""),
+                        method=endpoint_data.get("method", "GET"),
+                        description=endpoint_data.get("description", ""),
+                        parameters=parameters,
+                        required_auth=endpoint_data.get("required_auth", True),
+                        examples=endpoint_data.get("examples", [])
+                    ))
+
+            # If we couldn't extract endpoints, use the existing ones
+            if not detailed_endpoints:
+                detailed_endpoints = api_info.endpoints
+
+        except Exception as e:
+            self.logger.error(f"Error extracting detailed endpoints: {e}")
+            detailed_endpoints = api_info.endpoints
+
+        # Cache the results
+        self.cache.set(cache_key, [endpoint.json() for endpoint in detailed_endpoints])
+
+        return detailed_endpoints
 
     async def summarize_api(self, api_info: APIInfo) -> str:
         """
@@ -613,3 +745,63 @@ class DocumentationProcessor:
         """
 
         return summary
+
+    async def select_endpoint_for_need(self, endpoints: List[APIEndpoint], need_description: str) -> Optional[APIEndpoint]:
+        """
+        Select the most appropriate endpoint for a specific need.
+
+        Args:
+            endpoints: List of available endpoints
+            need_description: Description of the capability needed
+
+        Returns:
+            Most appropriate endpoint or None if no suitable endpoint found
+        """
+        if not endpoints:
+            return None
+
+        # If only one endpoint, return it
+        if len(endpoints) == 1:
+            return endpoints[0]
+
+        # Generate embeddings and find the most relevant endpoint
+        try:
+            # Import here to avoid circular imports
+            from atia.utils.openai_client import get_embedding
+
+            # Get embedding for the need description
+            need_embedding = await get_embedding(need_description)
+
+            # Get embeddings for each endpoint
+            endpoint_embeddings = []
+            for endpoint in endpoints:
+                endpoint_text = f"{endpoint.method} {endpoint.path}: {endpoint.description}"
+                endpoint_embedding = await get_embedding(endpoint_text)
+                endpoint_embeddings.append(endpoint_embedding)
+
+            # Calculate similarity scores
+            import numpy as np
+            from numpy.linalg import norm
+
+            scores = []
+            for i, endpoint_embedding in enumerate(endpoint_embeddings):
+                similarity = np.dot(need_embedding, endpoint_embedding) / (norm(need_embedding) * norm(endpoint_embedding))
+                scores.append((i, similarity))
+
+            # Sort by similarity (highest first)
+            scores.sort(key=lambda x: x[1], reverse=True)
+
+            # Return the most similar endpoint
+            return endpoints[scores[0][0]]
+        except Exception as e:
+            self.logger.error(f"Error selecting endpoint: {e}")
+
+            # Fall back to first endpoint that seems relevant based on keywords
+            need_words = need_description.lower().split()
+            for endpoint in endpoints:
+                endpoint_text = f"{endpoint.method} {endpoint.path} {endpoint.description}".lower()
+                if any(word in endpoint_text for word in need_words):
+                    return endpoint
+
+            # If no obvious match, use the first endpoint
+            return endpoints[0]
