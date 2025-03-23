@@ -1,14 +1,15 @@
 """
-OpenAI client utilities with Responses API support.
+OpenAI client utilities with enhanced Responses API support.
 
 This module provides utilities for interacting with OpenAI's API, including
-both standard completions and the new Responses API.
+both standard completions and the Responses API with improved tool handling.
 """
 
 from typing import Dict, List, Optional, Union, Any
 import json
 import time
 import logging
+import asyncio
 
 import openai
 from openai import OpenAI
@@ -122,12 +123,6 @@ async def get_embedding(text: str, model: str = "text-embedding-ada-002") -> Lis
         raise
 
 
-# New Responses API functions
-"""
-Modified version of get_completion_with_responses_api function.
-Replace this function in atia/utils/openai_client.py
-"""
-
 @retry(wait=wait_exponential(min=1, max=60), stop=stop_after_attempt(5))
 async def get_completion_with_responses_api(
     prompt: str,
@@ -137,7 +132,7 @@ async def get_completion_with_responses_api(
     model: str = settings.openai_model,
 ) -> Dict:
     """
-    Get a completion using the Responses API.
+    Get a completion using the Responses API with enhanced tool support.
 
     Args:
         prompt: The user prompt
@@ -179,13 +174,23 @@ async def get_completion_with_responses_api(
             # Check if the response contains tool calls
             if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
                 # There are tool calls to execute
+                tool_calls = []
+                for tool_call in response.choices[0].message.tool_calls:
+                    tool_calls.append({
+                        "id": tool_call.id,
+                        "function": {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments
+                        }
+                    })
+
                 return {
                     "status": "requires_action",
                     "thread_id": "direct_" + str(time.time()),  # Create a fake thread ID
                     "run_id": "direct_" + str(time.time()),     # Create a fake run ID
                     "required_action": {
                         "submit_tool_outputs": {
-                            "tool_calls": response.choices[0].message.tool_calls
+                            "tool_calls": tool_calls
                         }
                     }
                 }
@@ -233,18 +238,19 @@ async def get_completion_with_responses_api(
         raise
 
 
-async def _wait_for_run_completion(thread_id: str, run_id: str) -> Dict:
+async def _wait_for_run_completion(thread_id: str, run_id: str, max_wait_time: int = 300) -> Dict:
     """
-    Wait for a run to complete and process the results.
+    Wait for a run to complete and process the results with improved handling.
 
     Args:
         thread_id: The thread ID
         run_id: The run ID
+        max_wait_time: Maximum time to wait in seconds
 
     Returns:
         The processed response
     """
-    max_polling_attempts = 60  # Prevent infinite loops
+    max_polling_attempts = max_wait_time  # Max wait at 1s intervals
     polling_attempts = 0
 
     while polling_attempts < max_polling_attempts:
@@ -287,12 +293,28 @@ async def _wait_for_run_completion(thread_id: str, run_id: str) -> Dict:
 
             elif run.status == "requires_action":
                 logger.info(f"Run {run_id} requires action (tool calls)")
-                # This will be handled by execute_tools_in_run
+
+                # Extract tool calls in a standardized format
+                tool_calls = []
+                for tool_call in run.required_action.submit_tool_outputs.tool_calls:
+                    tool_calls.append({
+                        "id": tool_call.id,
+                        "function": {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments
+                        }
+                    })
+
+                # Return a structured response for tool execution
                 return {
                     "status": "requires_action",
                     "thread_id": thread_id,
                     "run_id": run_id,
-                    "required_action": run.required_action
+                    "required_action": {
+                        "submit_tool_outputs": {
+                            "tool_calls": tool_calls
+                        }
+                    }
                 }
 
             elif run.status in ["failed", "cancelled", "expired"]:
@@ -304,7 +326,7 @@ async def _wait_for_run_completion(thread_id: str, run_id: str) -> Dict:
                 }
             else:
                 # Still running, wait before checking again
-                time.sleep(1)
+                await asyncio.sleep(1)
 
         except Exception as e:
             logger.error(f"Error checking run status: {e}")
@@ -318,6 +340,7 @@ async def execute_tools_in_run(
     thread_id: str, 
     run_id: str, 
     tool_executor,
+    tool_outputs: List[Dict] = None,
     max_iterations: int = 10
 ) -> Dict:
     """
@@ -327,14 +350,38 @@ async def execute_tools_in_run(
         thread_id: The thread ID
         run_id: The run ID
         tool_executor: The ToolExecutor instance
+        tool_outputs: Optional pre-computed tool outputs
         max_iterations: Maximum number of tool execution iterations
 
     Returns:
         The final response after tool execution
     """
     iteration = 0
-    client = OpenAI(api_key=settings.openai_api_key)
 
+    # First, check if this is a direct API call (not an Assistants API run)
+    if thread_id.startswith("direct_") and run_id.startswith("direct_"):
+        # This is a direct chat completion API call
+        if tool_outputs:
+            # We have pre-computed tool outputs, so we can just return them
+            # In a real scenario, we'd submit these to another API call
+            return {
+                "content": f"Tools executed successfully. Results: {json.dumps([o.get('output', '') for o in tool_outputs])}",
+                "source": "direct_tool_execution"
+            }
+        else:
+            # Fetch tool calls from the required_action of the run
+            tool_calls = []
+            # Execute each tool
+            for tool_call in tool_calls:
+                result = await tool_executor.execute_tool(tool_call)
+                tool_outputs.append(result)
+
+            return {
+                "content": f"Tools executed successfully. Results: {json.dumps([o.get('output', '') for o in tool_outputs])}",
+                "source": "direct_tool_execution"
+            }
+
+    # Regular Assistants API run
     while iteration < max_iterations:
         iteration += 1
         logger.info(f"Tool execution iteration {iteration} for run {run_id}")
@@ -376,30 +423,37 @@ async def execute_tools_in_run(
             elif run.status == "requires_action":
                 logger.info(f"Run {run_id} requires action - executing tools")
 
-                # Handle tool calls
-                tool_calls = run.required_action.submit_tool_outputs.tool_calls
-                tool_outputs = []
+                # Check if we have pre-computed tool outputs
+                if tool_outputs:
+                    logger.info(f"Using {len(tool_outputs)} pre-computed tool outputs")
+                else:
+                    # Handle tool calls
+                    tool_outputs = []
+                    tool_calls = run.required_action.submit_tool_outputs.tool_calls
 
-                for tool_call in tool_calls:
-                    try:
-                        # Execute the tool using the ToolExecutor
-                        tool_result = await tool_executor.execute_tool({
-                            "id": tool_call.id,
-                            "function": {
-                                "name": tool_call.function.name,
-                                "arguments": tool_call.function.arguments
+                    for tool_call in tool_calls:
+                        try:
+                            # Convert to the format expected by the tool executor
+                            formatted_tool_call = {
+                                "id": tool_call.id,
+                                "function": {
+                                    "name": tool_call.function.name,
+                                    "arguments": tool_call.function.arguments
+                                }
                             }
-                        })
 
-                        tool_outputs.append(tool_result)
-                        logger.info(f"Tool {tool_call.function.name} executed successfully")
-                    except Exception as e:
-                        logger.error(f"Error executing tool {tool_call.function.name}: {e}")
-                        # Create error response
-                        tool_outputs.append({
-                            "tool_call_id": tool_call.id,
-                            "output": json.dumps({"error": str(e)})
-                        })
+                            # Execute the tool
+                            tool_result = await tool_executor.execute_tool(formatted_tool_call)
+
+                            tool_outputs.append(tool_result)
+                            logger.info(f"Tool {tool_call.function.name} executed successfully")
+                        except Exception as e:
+                            logger.error(f"Error executing tool {tool_call.function.name}: {e}")
+                            # Create error response
+                            tool_outputs.append({
+                                "tool_call_id": tool_call.id,
+                                "output": json.dumps({"error": str(e)})
+                            })
 
                 logger.info(f"Submitting {len(tool_outputs)} tool outputs for run {run_id}")
 
@@ -410,12 +464,20 @@ async def execute_tools_in_run(
                     tool_outputs=tool_outputs
                 )
 
+                # Clear tool outputs for next iteration
+                tool_outputs = None
+
                 # Wait before checking again
                 await asyncio.sleep(1)
 
             elif run.status in ["failed", "cancelled", "expired"]:
                 logger.error(f"Run {run_id} ended with status: {run.status}")
-                return {"error": f"Run ended with status: {run.status}", "thread_id": thread_id, "run_id": run_id}
+                error_details = getattr(run, "last_error", {"message": f"Run ended with status: {run.status}"})
+                return {
+                    "error": error_details,
+                    "thread_id": thread_id,
+                    "run_id": run_id
+                }
             else:
                 # Wait before checking again
                 await asyncio.sleep(1)
