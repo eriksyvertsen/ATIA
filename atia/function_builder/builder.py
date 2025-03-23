@@ -725,65 +725,65 @@ from typing import Dict, List, Optional, Any
 
         return tool_schema
 
-async def build_function_for_api(self, api_info: APIInfo, endpoint: APIEndpoint, tool_need_description: str = None) -> FunctionDefinition:
-    """
-    Build a complete function for an API based on documentation and endpoint.
+    async def build_function_for_api(self, api_info: APIInfo, endpoint: APIEndpoint, tool_need_description: str = None) -> FunctionDefinition:
+        """
+        Build a complete function for an API based on documentation and endpoint.
 
-    Args:
-        api_info: API information
-        endpoint: Specific endpoint to build function for
-        tool_need_description: Optional description of the tool need for better function customization
+        Args:
+            api_info: API information
+            endpoint: Specific endpoint to build function for
+            tool_need_description: Optional description of the tool need for better function customization
 
-    Returns:
-        Complete function definition
-    """
-    # Generate function name
-    function_name = self._generate_function_name(api_info.base_url, endpoint)
+        Returns:
+            Complete function definition
+        """
+        # Generate function name
+        function_name = self._generate_function_name(api_info.base_url, endpoint)
 
-    # Map parameters from endpoint
-    parameters = self._generate_parameters(endpoint)
+        # Map parameters from endpoint
+        parameters = self._generate_parameters(endpoint)
 
-    # Select appropriate template based on API type and method
-    api_type = ApiType.REST  # Default to REST for now
-    template = self._select_template(api_type, endpoint.method)
+        # Select appropriate template based on API type and method
+        api_type = ApiType.REST  # Default to REST for now
+        template = self._select_template(api_type, endpoint.method)
 
-    # Generate function code with authentication
-    code = self._generate_function_code(
-        template=template,
-        function_name=function_name,
-        base_url=api_info.base_url,
-        endpoint=endpoint,
-        parameters=parameters,
-        auth_methods=api_info.auth_methods
-    )
+        # Generate function code with authentication
+        code = self._generate_function_code(
+            template=template,
+            function_name=function_name,
+            base_url=api_info.base_url,
+            endpoint=endpoint,
+            parameters=parameters,
+            auth_methods=api_info.auth_methods
+        )
 
-    # Generate tags (with tool need description if provided)
-    tags = self._generate_tags(api_info, endpoint)
-    if tool_need_description:
-        # Extract key terms from tool need
-        need_words = re.findall(r'\b\w+\b', tool_need_description.lower())
-        for word in need_words:
-            if len(word) > 3 and word not in ['with', 'from', 'this', 'that', 'will', 'have', 'about', 'what']:
-                tags.append(word)
+        # Generate tags (with tool need description if provided)
+        tags = self._generate_tags(api_info, endpoint)
+        if tool_need_description:
+            # Extract key terms from tool need
+            need_words = re.findall(r'\b\w+\b', tool_need_description.lower())
+            for word in need_words:
+                if len(word) > 3 and word not in ['with', 'from', 'this', 'that', 'will', 'have', 'about', 'what']:
+                    tags.append(word)
 
-    # Create function definition
-    function_def = FunctionDefinition(
-        name=function_name,
-        description=endpoint.description or f"{endpoint.method} {endpoint.path}",
-        api_source_id=api_info.source_id,
-        api_type=api_type,
-        parameters=parameters,
-        code=code,
-        endpoint=endpoint.path,
-        method=endpoint.method,
-        response_format=endpoint.response_format or {},
-        tags=list(set(tags)),  # Deduplicate tags
-        test_cases=self._generate_test_cases(endpoint)
-    )
+        # Create function definition
+        function_def = FunctionDefinition(
+            name=function_name,
+            description=endpoint.description or f"{endpoint.method} {endpoint.path}",
+            api_source_id=api_info.source_id,
+            api_type=api_type,
+            parameters=parameters,
+            code=code,
+            endpoint=endpoint.path,
+            method=endpoint.method,
+            response_format=endpoint.response_format or {},
+            tags=list(set(tags)),  # Deduplicate tags
+            test_cases=self._generate_test_cases(endpoint)
+        )
 
-    # Validate function
-    is_valid, messages = await self.validate_function(function_def)
-    if not is_valid:
-        logger.warning(f"Generated function has validation issues: {', '.join(messages)}")
+        # Validate function
+        is_valid, messages = await self.validate_function(function_def)
+        if not is_valid:
+            logger.warning(f"Generated function has validation issues: {', '.join(messages)}")
 
-    return function_def
+        return function_def

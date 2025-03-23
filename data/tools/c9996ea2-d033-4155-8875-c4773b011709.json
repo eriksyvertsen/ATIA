@@ -1,0 +1,25 @@
+{
+  "id": "c9996ea2-d033-4155-8875-c4773b011709",
+  "name": "_test",
+  "description": "Test endpoint",
+  "function_id": "7d63fa97-8afc-4ab2-9c50-ac51903a939d",
+  "api_source_id": "-2696811468183207765",
+  "capability_tags": [
+    "get",
+    "text",
+    "french",
+    "test",
+    "translate",
+    "param:param",
+    "english"
+  ],
+  "metadata": {
+    "endpoint": "/test",
+    "method": "GET",
+    "api_type": "rest"
+  },
+  "usage_count": 0,
+  "created_at": "2025-03-23T19:07:33.375299",
+  "updated_at": "2025-03-23T19:07:33.375301",
+  "last_used": null
+}

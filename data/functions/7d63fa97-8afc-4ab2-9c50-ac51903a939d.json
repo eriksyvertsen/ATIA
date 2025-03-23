@@ -1,0 +1,31 @@
+{
+  "id": "7d63fa97-8afc-4ab2-9c50-ac51903a939d",
+  "name": "_test",
+  "description": "Test endpoint",
+  "api_source_id": "-2696811468183207765",
+  "api_type": "rest",
+  "parameters": [
+    {
+      "name": "param",
+      "param_type": "string",
+      "description": "Test parameter",
+      "required": true,
+      "default_value": null
+    }
+  ],
+  "code": "import aiohttp\nimport json\nfrom typing import Dict, List, Optional, Any\n\n\nasync def _test(param: string):\n    \"\"\"\n    Test endpoint\n\n    Args:\n    param: Test parameter\n\n    Returns:\n    The API response data.\n\n    Raises:\n    APIError: If the API request fails\n    \"\"\"\n    url = \"/Endpoint/test\"\n    headers = {\n        \"Authorization\": \"Bearer $AUTH_TOKEN\",\n        \"Content-Type\": \"application/json\"\n    }\n    params = {\"param\": param}\n\n    async with aiohttp.ClientSession() as session:\n        async with session.get(url, headers=headers, params=params) as response:\n            if response.status < 200 or response.status >= 300:\n                error_text = await response.text()\n                raise APIError(f\"Request failed with status {response.status}: {error_text}\")\n\n            result = await response.json()\n            return result\n",
+  "endpoint": "/test",
+  "method": "GET",
+  "response_format": {},
+  "tags": [
+    "get",
+    "text",
+    "french",
+    "test",
+    "translate",
+    "param:param",
+    "english"
+  ],
+  "created_at": "2025-03-23T19:07:32.696378",
+  "updated_at": "2025-03-23T19:07:32.696384"
+}
